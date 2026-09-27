@@ -2,8 +2,19 @@
 const fs = require('fs');
 const path = require('path');
 
-const AGENTS_MAX_BYTES = 8 * 1024;
+// Red Hat's AGENTS.md guidance (2026-07) sets the budget in lines, not bytes:
+// "aim for fewer than 150 lines". Bytes stay as an advisory because a hard byte
+// cap deletes rules once a project legitimately needs more, which is exactly
+// why docstudio/ADR-0002 downgraded its 8 KB cap to an advisory measurement.
+const AGENTS_MAX_LINES = 150;
+const AGENTS_MAX_BYTES = 12 * 1024;
+const AGENTS_BUDGET_BYTES = 8 * 1024;
 const AGENTS_MIN_BYTES = 200;
+// Trend-aligned thin-handoff caps. somatlas ADR-0015 and docstudio both hard-cap
+// the handoff at 80 lines; Red Hat's AGENTS.md guidance (2026-07) is that
+// context dilutes signal and every line must earn its place.
+const PROMPT_MAX_LINES = 80;
+const SESSION_FILES = ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'REVIEW.md', 'next-session-prompt.md'];
 const STATE_REQUIRED_FIELDS = {
   session: 'string',
   todo_active: ['string', 'null'],
@@ -90,6 +101,7 @@ function walk(dir, out = []) {
 
 function check(rootArg) {
   const failures = [];
+  const advisories = [];
   const fail = (expected, actual, file, msg) => failures.push({ file, expected, actual, msg });
 
   // Compare real paths on both sides: on macOS os.tmpdir() is /var/... while its
@@ -126,9 +138,22 @@ function check(rootArg) {
   } else {
     const body = fs.readFileSync(agents, 'utf8');
     const bytes = Buffer.byteLength(body);
+    const lines = body.split('\n').length;
+    if (lines > AGENTS_MAX_LINES) {
+      fail(`<= ${AGENTS_MAX_LINES} lines`, `${lines} lines`, 'AGENTS.md',
+        'entry instructions exceed the thin-context budget; move detail behind a path reference');
+    }
     if (bytes > AGENTS_MAX_BYTES) {
       fail(`<= ${AGENTS_MAX_BYTES} bytes`, `${bytes} bytes`, 'AGENTS.md',
-        'entry instructions exceed the thin-context cap; move detail behind a path reference');
+        'entry instructions exceed the absolute size limit');
+    }
+    if (bytes > AGENTS_BUDGET_BYTES) {
+      advisories.push({
+        file: 'AGENTS.md',
+        expected: `<= ${AGENTS_BUDGET_BYTES} bytes (8 KB advisory budget)`,
+        actual: `${bytes} bytes`,
+        msg: 'over the preferred 8 KB budget; consider splitting detail into a referenced file',
+      });
     }
     if (bytes < AGENTS_MIN_BYTES) {
       fail(`>= ${AGENTS_MIN_BYTES} bytes`, `${bytes} bytes`, 'AGENTS.md',
@@ -177,7 +202,16 @@ function check(rootArg) {
       fail(`>= 200 bytes`, `${Buffer.byteLength(body)} bytes`, 'docs/next-session-prompt.md',
         'the handoff is too thin to resume from');
     }
-    for (const name of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md']) {
+    const lines = body.split('\n').length;
+    if (lines > PROMPT_MAX_LINES) {
+      fail(`<= ${PROMPT_MAX_LINES} lines`, `${lines} lines`, 'docs/next-session-prompt.md',
+        'the handoff is a routing note, not a report; move detail to TICKETS or TEST-LOG');
+    }
+    if (!/TOOL_LABEL\s*[:=]/.test(body)) {
+      fail('a `TOOL_LABEL:` line', 'absent', 'docs/next-session-prompt.md',
+        'this repo exists to keep behaviour model-independent; an unrecorded model makes drift invisible');
+    }
+    for (const name of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'REVIEW.md']) {
       const q = path.join(closeDocs, name);
       if (!fs.existsSync(q)) fail(`${name} synced to docs/`, 'missing', `docs/${name}`,
         'session-end docs must be synced to the docs root for the gate to see them');
@@ -205,6 +239,13 @@ function check(rootArg) {
     }
   }
 
+  // DONE.md is a dated history artifact. browser-design-forensics forbids it at the
+  // docs root and 15 of the 20 projects following this convention omit it.
+  if (fs.existsSync(path.join(closeDocs, 'DONE.md'))) {
+    fail('no docs/DONE.md', 'present', 'docs/DONE.md',
+      'DONE.md is a dated history artifact; the live copy belongs in the session folder only');
+  }
+
   const sessionsRoot = path.join(closeDocs, 'sessions');
   if (fs.existsSync(sessionsRoot)) {
     const dated = fs.readdirSync(sessionsRoot)
@@ -212,10 +253,17 @@ function check(rootArg) {
       .sort();
     if (dated.length) {
       const latest = dated[dated.length - 1];
-      for (const name of ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'next-session-prompt.md']) {
+      for (const name of SESSION_FILES) {
         const q = path.join(sessionsRoot, latest, name);
         if (!fs.existsSync(q)) fail(`${name} present`, 'missing', `docs/sessions/${latest}/${name}`,
           'a dated session folder is incomplete');
+      }
+      const reviewPath = path.join(sessionsRoot, latest, 'REVIEW.md');
+      const review = fs.existsSync(reviewPath) ? fs.readFileSync(reviewPath, 'utf8') : '';
+      if (fs.existsSync(reviewPath) && !/REVIEW_(RESULT|MODEL)\s*[:=]/.test(review)) {
+        fail('a `REVIEW_RESULT:` or `REVIEW_MODEL:` line', 'absent',
+          `docs/sessions/${latest}/REVIEW.md`,
+          'AGENTS.md makes an independent review mandatory at session close; the artifact must record it');
       }
     }
   }
@@ -352,7 +400,7 @@ function check(rootArg) {
     });
   }
 
-  return { failures, exemptions };
+  return { failures, advisories, exemptions };
 }
 
 function gitHead(root) {
@@ -406,9 +454,12 @@ function safeRealpath(p) {
 
 function main() {
   const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
-  const { failures, exemptions } = check(root);
+  const { failures, advisories, exemptions } = check(root);
 
   if (failures.length === 0) {
+    for (const a of advisories || []) {
+      console.log(`  [ADVISORY] ${a.file}: ${a.msg} (expected ${a.expected}, actual ${a.actual})`);
+    }
     console.log(`validate-context: OK (${path.basename(root)})`);
     const ex = exemptions || [];
     if (ex.length) {
@@ -431,4 +482,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { check, AGENTS_MAX_BYTES, AGENTS_MIN_BYTES, STATE_REQUIRED_FIELDS, VALID_STAGES, EVIDENCE_MIN_BYTES, HOME_PATH_EXEMPT };
+module.exports = { check, AGENTS_MAX_BYTES, AGENTS_MAX_LINES, AGENTS_BUDGET_BYTES, AGENTS_MIN_BYTES, STATE_REQUIRED_FIELDS, VALID_STAGES, EVIDENCE_MIN_BYTES, HOME_PATH_EXEMPT };

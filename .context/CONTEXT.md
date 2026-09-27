@@ -226,3 +226,53 @@ fixture에 회귀 테스트 15건 추가.
 - **fork의 GitHub Actions 미실행.** `joonake9644/pro-workflow`에 push했으나 run 기록이
   0건이다. fork는 push 트리거 워크플로가 기본 비활성이며, 활성화 여부를 확인하지
   못했다. 따라서 CI 게이트는 로컬 3버전 실측만으로 뒷받침된다.
+
+## 문서 하네스 최신 트렌드 정렬 (2026-09-28)
+
+### projects 전역 실측 (28개 디렉터리, explore 서브에이전트)
+| 항목 | 실측 |
+|------|------|
+| 핸드오프 5파일 블록 `{next-session-prompt, TICKETS, DONE, CONTEXT, TEST-LOG}` | **20/28 프로젝트**에서 동일. `docs/<name>` + `docs/sessions/YYYY-MM-DD/<name>` 이중 저장 |
+| `REVIEW.md` | 7개 프로젝트, 날짜 폴더 214개 중 80개 |
+| `.context/STATE` 7키 JSON | 19개 프로젝트 중 15개 (4개는 비JSON으로 드리프트) |
+| `docs/DONE.md` 루트 배치 | 5개 있음 / 15개 없음. `browser-design-forensics`는 **반드시 없어야 한다**고 단언 |
+| `session:close` 게이트 | 스크립트 존재 15개 프로젝트 중 **CI에서 실행되는 곳 0개** |
+| `validate:context` / `check:context` | CI에서 실행 2개(`pro-workflow-lab`, `docstudio`). `somatlas`은 스크립트만 있고 CI에 없음 |
+
+**조사에서 드러난 최대 공백**: 게이트를 만들어 놓고 파이프라인에 못 박은 프로젝트가 대부분.
+이 저장소는 예외가 아니라 정상이고, `validate:context`를 CI에 넣은 2개 중 하나다.
+
+### 트렌드 근거
+- Red Hat Developer (2026-07-27): AGENTS.md는 **덤프가 아니라 색인**. 150줄 미만, 소형 저장소는
+  30~50줄. 문장마다 "이걸 지우면 에이전트가 실수하는가?" 를 묻는다. **자동 생성 컨텍스트 파일은
+  모델 성능을 해친다**(ETH Zurich 연구). CLAUDE.md는 `@AGENTS.md` 한 줄로 충분하다.
+- VS Code context engineering: "start small, iterate", "stale context는 부정확한 제안을 만든다",
+  living documents, "context overload는 초점을 흐린다".
+- Fowler *Harness engineering* (2026-04): guides(feedforward) + sensors(feedback).
+- OpenAI *Harness engineering* (2026-02): AGENTS.md는 지도, 저장소 문서가 사실 원천, 기계적 강제.
+
+### 채택 (센서 + 테스트로 강제)
+1. **handoff 80줄 하드 캡** — somatlas ADR-0015·docstudio와 동일. 실측 76줄.
+2. **`REVIEW.md` 6번째 파일** — `AGENTS.md`가 세션 종료 독립 리뷰를 필수화하면서 결과물을 남길
+   자리가 없었다. 규칙과 산출물의 불일치를 닫는다. `REVIEW_MODEL`·`REVIEW_RESULT` 필수.
+3. **`TOOL_LABEL` 필수** — 이 저장소의 존재 이유가 모델 비의존성인데, 쓰인 모델을 안 남기면
+   드리프트가 보이지 않는다.
+4. **`docs/DONE.md` 루트 금지** — 15/20이 없고 1개 프로젝트가 부재까지 단언한다.
+5. **freshness** — 종료 문서가 **제품 코드** 최신 커밋을 반영해야 한다. `docs/`·`.context/` 만 건드린
+   커밋은 예외(그래야 "handoff를 갱신하는 커밋"이 자기 자신을 무효화하지 않는다).
+6. **진입문서 예산을 줄 단위로** — Red Hat가 제시한 150줄을 하드로, 8KB는 advisory로, 절대 한계
+   12KB를 하드로. 근거: `docstudio/ADR-0002`도 8KB 하드 캡이 "규칙을 삭제하는 결과"를 내지
+   근거를 남기고 advisory로 강등했다. 같은 판단을 따른다.
+
+### 명시적으로 채택하지 않음 (오버웨이트·드리프트 증명)
+- `.harness/policy.json`+`work-items.json`+`state.json` — 조사에서 **서로 호환되지 않는 스키마 2종**
+  (B1 7키 / B2 5키)이 공존했다. `.context/STATE`(15/28 표준)를 이미 쓰고 있다.
+- `HARNESS_NORTH_STAR` / `PLAN_APPROVAL` / `RETURN_TO` 헤더 블록 — 3개 프로젝트의 제품 특정 설계.
+- `korean-ascent-ai`의 510줄 STATE — 인센서스 기록상 다른 모든 STATE보다 40배 큰 **역사적 안티패턴**.
+- handoff에 전체 대화 히리를 담는 방식 — OpenAI Agents SDK의 `input_filter`가 지향하는 바와 반대.
+
+### 이번 작업 중 내가 만든 결함 (테스트가 잡음)
+- REVIEW.md를 무조건 읽어 크래시(ENOENT) — 존재 확인 후 읽도록 수정.
+- `docs/DONE.md` 검사를 날짜 폴더 블록 안에 넣어, 세션 폴더가 없으면 실행되지 않음 — 독립
+  docs 루트 규칙이므로 블록 밖으로 이동.
+- 편집 실수 3건: 중복 `const` 선언, 함수를 문자열로 바꿈, `gitRepo`가 플래그를 `extraFiles`로 전달.

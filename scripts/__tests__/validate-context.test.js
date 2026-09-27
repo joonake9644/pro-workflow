@@ -10,6 +10,8 @@ const { check, AGENTS_MAX_BYTES, AGENTS_MIN_BYTES, HOME_PATH_EXEMPT } = require(
 // Built from fragments on purpose: the detector's own source must not contain a
 // literal home path, or the checker flags its test suite.
 const B = String.fromCharCode(92);
+const TOOL_LABEL_LINE = 'TOOL_LABEL: harness\n\n';
+const HANDOFF_OK = (extra = '') => `${TOOL_LABEL_LINE}# handoff\n\nbaseline\n\n${'x'.repeat(240)}\n${extra}`;
 const MAC = '/' + 'Us' + 'ers' + '/some' + 'body';
 const LIN = '/' + 'ho' + 'me' + '/some' + 'body';
 const WIN = 'C:' + B + 'Us' + 'ers' + B + 'some' + 'body';
@@ -51,8 +53,13 @@ function makeProject(overrides = {}) {
   }
 
   // default: a complete, gate-passing session-end handoff set
-  const handoff = { 'docs/next-session-prompt.md': '# handoff\n\nbaseline\n\n' + 'x'.repeat(240) + '\n' };
+  const handoff = { 'docs/next-session-prompt.md': HANDOFF_OK() };
   for (const n of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md']) handoff[`docs/${n}`] = '# ok\n';
+  handoff['docs/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  if (overrides.datedSession !== false) {
+    for (const n of SESSION_FILES) handoff[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+    handoff['docs/sessions/2026-09-28/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  }
   for (const [rel, body] of Object.entries(handoff)) {
     if (overrides.omit?.some(f => rel.endsWith(f))) continue;
     if (rel in (overrides.extraFiles ?? {})) continue;
@@ -112,8 +119,8 @@ test('missing AGENTS.md is caught', () => {
 test('AGENTS.md over the thin-context cap is caught', () => {
   const root = makeProject({ agents: 'x'.repeat(AGENTS_MAX_BYTES + 1) });
   const { failures } = check(root);
-  assert.ok(msgs(failures).some(m => m.includes('thin-context cap')));
-  assert.ok(failures.some(f => f.expected.includes('8192')));
+  assert.ok(msgs(failures).some(m => m.includes('absolute size limit')));
+  assert.ok(failures.some(f => f.expected.includes(String(AGENTS_MAX_BYTES))));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -628,7 +635,8 @@ test('the real repository keeps CLAUDE.md a thin adapter', () => {
 
 // --- session-end harness: closing a session is machine-checked ---
 
-const SESSION_DOCS = ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md'];
+const SESSION_DOCS = ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'REVIEW.md'];
+const SESSION_FILES = ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'REVIEW.md', 'next-session-prompt.md'];
 
 test('a missing next-session-prompt is reported', () => {
   const root = makeProject({ omit: ['next-session-prompt.md'] });
@@ -639,7 +647,7 @@ test('a missing next-session-prompt is reported', () => {
 
 test('a handoff without a baseline section is reported', () => {
   const root = makeProject({
-    extraFiles: { 'docs/next-session-prompt.md': '# handoff\n\ndo the thing\n' },
+    extraFiles: { 'docs/next-session-prompt.md': `${TOOL_LABEL_LINE}# handoff\n\ndo the thing\n` },
   });
   const { failures } = check(root);
   assert.ok(msgs(failures).some(m => m.includes('cannot tell whether the baseline drifted')));
@@ -648,7 +656,7 @@ test('a handoff without a baseline section is reported', () => {
 
 test('a handoff that is too thin to resume from is reported', () => {
   const root = makeProject({
-    extraFiles: { 'docs/next-session-prompt.md': 'baseline ' + 'x'.repeat(80) },
+    extraFiles: { 'docs/next-session-prompt.md': `${TOOL_LABEL_LINE}baseline ` + 'x'.repeat(80) },
   });
   const { failures } = check(root);
   assert.ok(msgs(failures).some(m => m.includes('too thin to resume from')));
@@ -660,7 +668,7 @@ for (const name of SESSION_DOCS) {
     const root = makeProject({
       omit: [name],
       extraFiles: {
-        'docs/next-session-prompt.md': `# handoff\n\nbaseline ${'x'.repeat(240)}\n`,
+        'docs/next-session-prompt.md': `${TOOL_LABEL_LINE}# handoff\n\nbaseline ${'x'.repeat(240)}\n`,
       },
     });
     const { failures } = check(root);
@@ -671,17 +679,18 @@ for (const name of SESSION_DOCS) {
 }
 
 test('a complete handoff set passes', () => {
-  const body = `# handoff\n\nbaseline\n\n${'x'.repeat(240)}\n`;
-  const extra = { 'docs/next-session-prompt.md': body };
+  // this test builds the dated folder itself
+  const extra = { 'docs/next-session-prompt.md': HANDOFF_OK() };
   for (const n of SESSION_DOCS) extra[`docs/${n}`] = '# ok\n';
-  const root = makeProject({ extraFiles: extra });
+  const root = makeProject({ datedSession: false, extraFiles: extra });
   const { failures } = check(root);
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('an incomplete dated session folder is reported', () => {
-  const root = makeProject({
+  // this test builds the dated folder itself
+  const root = makeProject({ datedSession: false,
     extraFiles: { 'docs/sessions/2026-09-28/DONE.md': '# done\n' },
   });
   const { failures } = check(root);
@@ -709,8 +718,8 @@ test('the real repository satisfies the session-close gate', () => {
 
 const { execFileSync } = require('node:child_process');
 
-function gitRepo(files = {}) {
-  const root = makeProject({ extraFiles: files });
+function gitRepo({ datedSession, ...files } = {}) {
+  const root = makeProject({ extraFiles: files, datedSession });
   execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.email', 'harness@example.invalid'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.name', 'harness'], { cwd: root, stdio: 'ignore' });
@@ -719,12 +728,11 @@ function gitRepo(files = {}) {
   return root;
 }
 
-const HANDOFF_OK = extra => `# handoff\n\nbaseline\n\n${'x'.repeat(240)}\n${extra || ''}`;
 
 test('a handoff in a git repo that does not name the current commit is reported', () => {
-  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
   const { failures } = check(root);
-  assert.ok(msgs(failures).some(m => m.includes('predates the last commit')),
+  assert.ok(msgs(failures).some(m => m.includes('predates product work')),
     `expected a staleness report, got ${JSON.stringify(failures.map(f => f.msg))}`);
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -736,16 +744,16 @@ test('a handoff that names the current commit passes', () => {
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
 
   const { failures } = check(root);
-  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')),
+  assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
       `named commit ${head} must satisfy the freshness rule`);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('a handoff that names a stale commit is reported', () => {
-  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
   const { failures } = check(root);
-  assert.ok(msgs(failures).some(m => m.includes('predates the last commit')));
+  assert.ok(msgs(failures).some(m => m.includes('predates product work')));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -754,7 +762,7 @@ test('a handoff naming a longer sha still matches the short head', () => {
   const full = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim();
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${full}\n`));
   const { failures } = check(root);
-  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')),
+  assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
     'a full sha must satisfy a short-head comparison');
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -762,6 +770,112 @@ test('a handoff naming a longer sha still matches the short head', () => {
 test('a non-git tree with a valid handoff is not failed for freshness', () => {
   const root = makeProject();
   const { failures } = check(root);
-  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')));
+  assert.ok(!msgs(failures).some(m => m.includes('predates product work')));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// --- trend-aligned thin-handoff rules (somatlas ADR-0015 / docstudio / Red Hat 2026-07) ---
+
+test('a handoff over the 80-line cap is reported', () => {
+  const long = `${TOOL_LABEL_LINE}# handoff\n\nbaseline\n\n${'line\n'.repeat(90)}`;
+  const root = makeProject({ extraFiles: { 'docs/next-session-prompt.md': long } });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('routing note')),
+    `expected a thin-handoff report, got ${JSON.stringify(failures.map(f => f.msg))}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff that does not name the tool is reported', () => {
+  const root = makeProject({
+    extraFiles: { 'docs/next-session-prompt.md': '# handoff\n\nbaseline\n\n' + 'x'.repeat(240) + '\n' },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('unrecorded model makes drift invisible')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('docs/DONE.md at the root is reported: it is a dated history artifact', () => {
+  const root = makeProject({ extraFiles: { 'docs/DONE.md': '# done\n' } });
+  const { failures } = check(root);
+  assert.ok(files(failures).includes('docs/DONE.md'),
+    '15 of 20 projects following this convention omit it, and one asserts it must be absent');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a session folder missing REVIEW.md is reported', () => {
+  // this test builds the dated folder itself
+  const extra = { 'docs/sessions/2026-09-28/DONE.md': '# ok\n' };
+  for (const n of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'next-session-prompt.md']) {
+    extra[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+  }
+  const root = makeProject({ datedSession: false, extraFiles: extra });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('dated session folder is incomplete')));
+  assert.ok(files(failures).includes('docs/sessions/2026-09-28/REVIEW.md'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a REVIEW.md without a verdict line is reported', () => {
+  // this test builds the dated folder itself
+  const extra = {};
+  for (const n of ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'next-session-prompt.md']) {
+    extra[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+  }
+  extra['docs/sessions/2026-09-28/REVIEW.md'] = '# review\n\nlooked fine\n';
+  extra['docs/REVIEW.md'] = '# review\n\nlooked fine\n';
+  const root = makeProject({ datedSession: false, extraFiles: extra });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('must record it')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a REVIEW.md carrying a verdict passes', () => {
+  // this test builds the dated folder itself
+  const extra = {};
+  for (const n of ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'next-session-prompt.md']) {
+    extra[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+  }
+  extra['docs/sessions/2026-09-28/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  extra['docs/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  const root = makeProject({ datedSession: false, extraFiles: extra });
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('must record it')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// --- entry-doc budget: hard limit is lines (Red Hat 2026-07), bytes are advisory ---
+
+const { AGENTS_MAX_LINES, AGENTS_BUDGET_BYTES } = require(SRC);
+
+test('AGENTS.md over the 150-line budget is reported', () => {
+  const root = makeProject({ agents: 'x\n'.repeat(AGENTS_MAX_LINES + 5) });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('thin-context budget')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('AGENTS.md over 8 KB but under the line budget is an advisory, not a failure', () => {
+  // 40 fat lines: over the byte budget, comfortably under 150 lines.
+  const body = '# rules\n\n' + 'invariant guidance. '.repeat(15) + '\n\n'
+    + ('invariant guidance. '.repeat(15) + '\n\n').repeat(39);
+  const root = makeProject({ agents: body });
+  const { failures, advisories } = check(root);
+  assert.equal(failures.length, 0,
+    `bytes over the preferred budget must not delete rules; got ${JSON.stringify(failures, null, 2)}`);
+  assert.ok(advisories.some(a => a.file === 'AGENTS.md' && a.msg.includes('8 KB budget')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('AGENTS.md over the absolute size limit is still a failure', () => {
+  const body = '# rules\n\n' + ('invariant guidance. '.repeat(15) + '\n\n').repeat(400);
+  const root = makeProject({ agents: body });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('absolute size limit')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the real entry doc is inside both the line and byte budgets', () => {
+  const { failures, advisories } = check(path.join(__dirname, '..', '..'));
+  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
+  assert.deepEqual(advisories, [], JSON.stringify(advisories, null, 2));
 });

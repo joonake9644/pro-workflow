@@ -96,7 +96,9 @@
 | CI가 테스트를 돌릴 것 | `.github/workflows/ci.yml`의 `Run tests` 스텝. 제거하거나 matrix job 밖으로 옮기면 `src/__tests__/ci.test.ts`가 실패 |
 | 컨텍스트 파일이 유효할 것 | `npm run validate:context` → `scripts/validate-context.js` |
 | 이 세 가지를 한 번에 | `npm run verify` (check → test → validate:context) |
-| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `docs/sessions/<날짜>/` 5개 파일 + `docs/` 루트 동기화. 없거나 얇으면 exit 1 (`npm run session:close`) |
+| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋이 handoff에 기록됨. 위반 시 exit 1 (`npm run session:close`) |
+| 독립 리뷰가 실제로 돌아갔는가 | `docs/sessions/<날짜>/REVIEW.md`에 `REVIEW_MODEL`·`REVIEW_RESULT`. 규칙만 있고 결과물이 없으면 실패 |
+| 이력 문서가 현재본을 덮지 않음 | `docs/DONE.md` 금지. DONE은 날짜 폴더 전용 (20개 프로젝트 중 15개가 루트에 없음) |
 | 이 문서가 규칙의 유일한 원본 | `validate-context`의 CLAUDE.md import·중복 검사 |
 
 `scripts/validate-context.js`가 검사하는 것: AGENTS.md 8KB 캡과 200B 하한, `CLAUDE.md`가

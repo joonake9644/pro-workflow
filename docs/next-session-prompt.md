@@ -1,3 +1,5 @@
+TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek-v4.1-flash
+
 # 다음 세션 작업 지시서 — 2026-09-28 이후
 
 ## 🎯 다음 세션 목표
