@@ -52,7 +52,7 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 - passed: 225 / failed: 0 / suites: 16 / test files discovered: 9
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-09-28T00:20 (node v24.19.0, ABI 137)
-- 기록 시점 커밋: 7db97d9 (제품 코드 기준 최신 커밋. freshness 게이트는 이 값까지를 요구한다: 303d0dd)
+- 제품 커밋: 4efbdf9 (문서 하네스 트렌드 정렬 반영본) (제품 코드 기준 최신 커밋. freshness 게이트는 이 값까지를 요구한다: 303d0dd)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
 ## ⚠️ 주의사항
