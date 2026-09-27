@@ -174,3 +174,38 @@ fixture에 회귀 테스트 15건 추가.
 ### 남긴 minor/nit (TODO #023·#024)
 - `ci.test.ts`가 `|| :`·`; true` 같은 무음화는 아직 못 잡음.
 - `package.json`의 `files`가 `scripts`를 포함해 검증·테스트 스크립트가 npm 배포물에 실림.
+
+## [#004] [Storage] db 도메인 TDD (2026-09-28T00:10+09:00)
+
+`src/db/__tests__/store.test.ts` — **51 fixture**. API 맵은 explore 서브에이전트가 런타임 검증까지
+마쳐 제공했고, 함정 5건은 메인이 직접 재현한 뒤 테스트에 고정했다.
+
+| 그룹 | 수 | 고정한 동작 |
+|------|----|------------|
+| initializeDatabase | 5 | FK ON, 스키마 생성, 멱등, 없는 상위 디렉터리면 `TypeError`(SqliteError 아님), **상위 디렉터리를 만들지 않음** |
+| learnings | 13 | times_applied 0, project 필터가 project-less 행도 포함, 빈 문자열 필터는 전체 반환, updateLearning의 null은 "유지", NOT NULL, **FK 실패 시 트랜잭션 롤백**, FTS 트리거 동기(갱신·삭제) |
+| sessions | 6 | 중복 id 무시, ended_at 스탬프, 카운터 누적, **명시적 null이 카운터를 영구 NULL로**, limit honored |
+| wikis | 5 | 같은 slug·같은 위치 갱신, **다른 root_path 재등록은 plain Error(`code` 없음)**, deleteWiki cascade |
+| wiki pages | 8 | (slug, rel_path) upsert, FK·NOT NULL, FTS snippet·**rank가 음수**(bm25이므로 오름차순이 최우선), 빈 질의 조기 반환, FTS 메타문자 survives |
+| seeds | 7 | pending 기본, depth 정렬 우선, **peek은 비변경·claim은 active 전환**, status 무검증 저장 |
+| lifecycle | 2 | close 멱등, 닫힌 후 TypeError, 원시 핸들 노출 |
+
+### anti-tautology 실측 (뮤테이션 8/8 검출)
+프로덕션 코드를 실제로 고쳐 이 테스트가 RED가 되는지 확인했다.
+
+| 변조 | 결과 |
+|------|------|
+| `upsertWiki` 위치 가드 제거 | fail=1 |
+| `claimPendingSeed` 의 active 전환 제거 | fail=1 |
+| `searchWiki` 빈 질의 조기 반환 제거 | fail=1 |
+| `updateLearning` 의 project 무시 해제 | **fail=5** |
+| `nextPendingSeed` 정렬을 created_at 단독으로 | fail=1 |
+| `addLearning` 트랜잭션 무력화 | fail=1 |
+| `getAllLearnings` 프로젝트 필터 제거 | fail=1 |
+| `incrementTimesApplied` 를 덮어쓰기로 | fail=1 |
+
+### ABI 발견 — 이 리포의 다중 버전 검증에 구조적 제약
+`better_sqlite3.node`는 **한 ABI로만 빌드**된다. 공유 `node_modules` 상태에서 node를 전환하면
+20/22에서 49건이 실패했다(테스트 결함이 아니라 로드 실패). 버전별 `npm rebuild better-sqlite3`
+후에는 **3버전 모두 195/195 통과**. CI는 매 레그마다 `npm ci`를 하므로 영향이 없다.
+→ 로컬 다중 버전 검증 시 버전 전환 후 반드시 재빌드해야 한다.
