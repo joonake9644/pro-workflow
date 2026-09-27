@@ -187,18 +187,21 @@ function check(rootArg) {
       'no session-end handoff exists; run the session-wrap harness before closing a session');
   }
 
-  // Freshness: a session closed before the last commit is not a closed session.
-  // Only checked in a git checkout; a non-git tree is left alone.
+  // Freshness: a handoff that predates real work is not a handoff.
+  // Compared against the newest commit that touched a product path. Commits that
+  // only touch docs/ or .context/ are excluded, otherwise a commit whose only
+  // purpose is updating the handoff would make the handoff stale by construction
+  // and the rule could never be satisfied.
   if (fs.existsSync(prompt) && fs.existsSync(path.join(root, '.git'))) {
-    const head = gitHead(root);
+    const product = productHead(root);
     const body = fs.readFileSync(prompt, 'utf8');
-    if (!head) {
-      fail('a readable git HEAD', 'unavailable', 'docs/next-session-prompt.md',
-        'cannot verify that the session handoff matches the current commit');
-    } else if (!hasHeadRef(body, head)) {
-      fail(`the current commit ${head} named in the handoff`, 'absent or stale',
+    if (!product) {
+      fail('a readable git history', 'unavailable', 'docs/next-session-prompt.md',
+        'cannot verify that the session handoff reflects the current work');
+    } else if (!hasHeadRef(body, product) && !hasHeadRef(body, gitHead(root) || '')) {
+      fail(`commit ${product} (newest product change) or newer`, 'absent',
         'docs/next-session-prompt.md',
-        'the session handoff predates the last commit; re-run the session-end harness');
+        'the session handoff predates product work; re-run the session-end harness');
     }
   }
 
@@ -366,6 +369,18 @@ function gitHead(root) {
 
 // Accept a full 40-char sha as well as the 7-char short form: compare the short
 // head against the prefix of each hex token rather than requiring a word boundary.
+function productHead(root) {
+  try {
+    return require('child_process')
+      .execFileSync('git',
+        ['log', '-1', '--format=%h', '--', '.', ':(exclude)docs', ':(exclude).context'],
+        { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
+      .trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function hasHeadRef(text, head) {
   for (const token of text.match(/\b[0-9a-f]{7,40}\b/gi) || []) {
     if (token.toLowerCase().startsWith(head.toLowerCase())) return true;

@@ -13,7 +13,7 @@
 - 명령: `npm run verify` (check + test + validate:context) — **exit 0**
 - 발견된 테스트 파일: 9
 - `validate-context`: OK, AGENTS.md 7,451 bytes (8KB 캡의 91%)
-- 커밋: 3767650
+- 제품 코드 최신 커밋: 7db97d9
 
 ### 다중 버전 (ABI별 `npm rebuild better-sqlite3` 후)
 - node v20.11.0 / v22.17.0 / v24.19.0 모두 동일 게이트 통과 확인
