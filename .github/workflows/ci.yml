@@ -36,6 +36,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Validate session context
+        run: npm run validate:context
+
       - name: Verify dist files exist
         run: |
           test -f dist/index.js

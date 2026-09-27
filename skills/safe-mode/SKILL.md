@@ -145,7 +145,7 @@ Mode state lives in a session-scoped temp file (keyed by session ID to avoid cro
 $TMPDIR/pro-workflow/safe-mode-<sessionId>.json
 {
   "mode": "lockdown",
-  "lockdownPath": "/Users/dev/project/src/api",
+  "lockdownPath": "$HOME/project/src/api",
   "sessionId": "abc123",
   "activatedAt": "2026-03-28T10:00:00Z"
 }

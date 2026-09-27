@@ -9,7 +9,10 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build",
     "db:init": "node dist/db/index.js",
-    "test": "node scripts/run-tests.js"
+    "test": "node scripts/run-tests.js",
+    "check": "tsc --noEmit",
+    "validate:context": "node scripts/validate-context.js",
+    "verify": "npm run check && npm test && npm run validate:context"
   },
   "keywords": [
     "claude-code",
