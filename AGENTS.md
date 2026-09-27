@@ -5,6 +5,20 @@
 
 ---
 
+## 모델 비의존성 (어떤 모델·도구로都一样하게 작동하게 만드는 방법)
+
+모델을 바꿔도 **작동·기준·품질이 같아야** 한다. 이를 약속으로 두지 않고 기계로 만든다.
+
+1. **규칙은 한 곳에만 존재한다.** 이 파일이 원본이고 `CLAUDE.md`는 `@AGENTS.md`로 이 파일을
+   가리키는 얇은 어댑터일 뿐이다. Codex·Cursor·Gemini CLI는 `AGENTS.md`를 직접 읽는다.
+   두 파일에 복사하면 어느 쪽이 진짜인지 갈라진다.
+2. **규칙이 아니라 게이트로 강제한다.** `npm run verify`가 세 게이트를 돌고 같은 명령이
+   CI에서도 다시 돈다. 지시를 못 읽는 에이전트도 게이트는 통과할 수 없다.
+3. **센서가 규칙 파일 자체를 검사한다.** `validate-context`가 `CLAUDE.md`의 존재·`@AGENTS.md`
+   import·규칙 제목 중복을 확인한다. 강제 장치 표의 여섯 번째 행이 그 대응물이다.
+4. **모델·effort 전환은 품질을 바꾸지 않는다.** 통과 기준은 `npm run verify`의 exit code
+   하나뿐이다. 모델이 나쁘면 그 모델을 바꾸고 기준을 낮추지 않는다.
+
 ## 세션 시작 규칙 (점진적 노출)
 
 이 파일은 매 세션 통째로 읽히므로 8KB 이하를 유지한다
@@ -78,14 +92,18 @@
 
 | 원칙 | 기계가 막는 곳 |
 |------|--------------|
-| 테스트가 실제로 실행될 것 | `npm test` → `scripts/run-tests.js`가 `src/`·`scripts/`를 깊이 무관 탐색. 0건이면 exit 1 |
-| CI가 테스트를 돌릴 것 | `.github/workflows/ci.yml`의 `Run tests` 스텝. 제거하면 `src/__tests__/ci.test.ts`가 실패 |
+| 테스트가 실제로 실행될 것 | `npm test` → `scripts/run-tests.js`가 `src/`·`scripts/`를 깊이 무관 탐색. 0건이면 exit 1. `__tests__/` 안의 비실행 파일은 제외 |
+| CI가 테스트를 돌릴 것 | `.github/workflows/ci.yml`의 `Run tests` 스텝. 제거하거나 matrix job 밖으로 옮기면 `src/__tests__/ci.test.ts`가 실패 |
 | 컨텍스트 파일이 유효할 것 | `npm run validate:context` → `scripts/validate-context.js` |
 | 이 세 가지를 한 번에 | `npm run verify` (check → test → validate:context) |
+| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `docs/sessions/<날짜>/` 5개 파일 + `docs/` 루트 동기화. 없거나 얇으면 exit 1 (`npm run session:close`) |
+| 이 문서가 규칙의 유일한 원본 | `validate-context`의 CLAUDE.md import·중복 검사 |
 
-`scripts/validate-context.js`가 검사하는 것: AGENTS.md 8KB 캡, `.context/STATE`의 필수
-7개 필드와 타입, CONTEXT/TODO/glossary의 존재·비어있지 않음, 커밋되는 문서에
-절대 경로(`/Users/<이름>/`)가 없는 것. 위반 시 고칠 파일·예상값·실제값을 출력하고
+`scripts/validate-context.js`가 검사하는 것: AGENTS.md 8KB 캡과 200B 하한, `CLAUDE.md`가
+`@AGENTS.md`를 import 하고 규칙을 복사하지 않았음, `.context/STATE`의 필수 7개 필드와 타입,
+`todo_active`이 TODO.md에 실제로 존재함, 심볼릭 링크가 저장소를 벗어나지 않음, 가짜 증거 차단,
+ADR 상태 라인, CONTEXT/TODO/glossary의 존재·비어있지 않음, 커밋되는 문서 전체에
+절대 홈경로(`/Users/<이름>/`·`/home/<이름>/`·`C:\Users\<이름>\`)가 없는 것. 위반 시 고칠 파일·예상값·실제값을 출력하고
 exit 1. AI 호출과 네트워크를 쓰지 않는다.
 
 pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 설정되어 있지 않고
@@ -95,11 +113,8 @@ pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 
 
 ---
 
-## 알려진 미해결 사항 (2026-09-27 실측)
+## 알려진 미해결 사항
 
-- **Node 18 CI 레그 검증 불가.** `engines: >=18.0.0`이나 `better-sqlite3@12.8.0`은
-  `20.x || 22.x || 23.x || 24.x || 25.x`를 요구한다. CI 매트릭스에 18이 있으나 이
-  환경에 node 18이 없어 실제 동작을 확인하지 못했다.
-- **fork의 GitHub Actions 미실행.** `joonake9644/pro-workflow`에 push했으나 run 기록이
-  0건이다. fork는 push 트리거 워크플로가 기본 비활성이며, 활성화 여부를 확인하지
-  못했다. 따라서 CI 게이트는 로컬 3버전 실측만으로 뒷받침된다.
+거부된 항목, 부분 구현, 스코프 밖으로 남긴 이유, 그리고 미검증 항목을 `.context/TODO.md`
+(#016~#030) 와 `.context/CONTEXT.md`의 "미검증 항목" 절에 적었다. 새 항목을 여기에 복사하지
+않고 거기 references만 둔다. 상세 목록을 이 파일에 복사하면 이 파일이 8KB 캡을 넘긴다.

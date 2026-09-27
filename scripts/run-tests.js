@@ -6,6 +6,15 @@ const { spawn } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const TEST_ROOTS = ['src', 'scripts'];
 const TEST_FILE_RE = /\.(test|spec)\.(ts|js|mts|cts|mjs|cjs)$/;
+const EXECUTABLE_RE = /\.(ts|tsx|js|mts|cts|mjs|cjs)$/;
+
+// A __tests__ directory can legitimately hold docs, JSON fixtures and snapshots.
+// Handing those to the runner makes tsx throw ERR_UNKNOWN_FILE_EXTENSION and takes
+// the whole suite down, so only executable files are collected from there.
+function isTestCandidate(name, inTestDir) {
+  if (TEST_FILE_RE.test(name)) return true;
+  return inTestDir && EXECUTABLE_RE.test(name);
+}
 
 function collectTestFiles(dir) {
   const found = [];
@@ -18,8 +27,7 @@ function collectTestFiles(dir) {
       continue;
     }
 
-    const inTestDir = path.basename(path.dirname(full)) === '__tests__';
-    if (TEST_FILE_RE.test(entry.name) || inTestDir) {
+    if (isTestCandidate(entry.name, path.basename(path.dirname(full)) === '__tests__')) {
       found.push(full);
     }
   }
@@ -59,3 +67,5 @@ function main() {
 }
 
 main();
+
+module.exports = { isTestCandidate, collectTestFiles, TEST_ROOTS };

@@ -68,6 +68,15 @@ describe('initializeDatabase', () => {
     assert.equal(fs.existsSync(path.join(dir, 'absent')), false);
   });
 
+  it('requests WAL, so a file-backed database actually reports it', () => {
+    const db = initializeDatabase(path.join(dir, 'wal.db'));
+    try {
+      assert.equal(db.pragma('journal_mode', { simple: true }), 'wal');
+    } finally {
+      db.close();
+    }
+  });
+
   it('ensureDbDir creates the app directory idempotently', () => {
     ensureDbDir();
     ensureDbDir();
@@ -242,9 +251,15 @@ describe('createStore', () => {
     it('getRecentSessions returns the most recent first and honours the limit', () => {
       store.startSession('r1');
       store.startSession('r2');
-      const two = store.getRecentSessions(2);
-      assert.equal(two.length, 2);
+      assert.equal(store.getRecentSessions(2).length, 2);
       assert.equal(store.getRecentSessions(0).length, 0);
+      assert.equal(store.getRecentSessions(1).length, 1);
+    });
+
+    it('getRecentSessions defaults to ten rows', () => {
+      for (let i = 0; i < 12; i++) store.startSession(`d${String(i).padStart(2, '0')}`);
+      assert.equal(store.getRecentSessions().length, 10);
+      assert.equal(store.getRecentSessions(12).length, 12);
     });
   });
 
@@ -342,7 +357,7 @@ describe('createStore', () => {
       assert.equal(hits.length, 1);
       assert.equal(typeof hits[0].snippet, 'string');
       assert.equal(typeof hits[0].rank, 'number');
-      assert.ok(hits[0].rank < 0, 'bm25 is a negative score, so ascending order is best-first');
+      assert.ok(hits[0].rank < 0, 'bm25 is a negative score');
     });
 
     it('searchWiki scopes by wiki slug', () => {
@@ -362,6 +377,46 @@ describe('createStore', () => {
       assert.deepEqual(store.searchWiki(''), []);
       assert.deepEqual(store.searchWiki('the and of'), [], 'stopword-only input is dropped');
       assert.deepEqual(store.searchWiki('mitochondria', { limit: 0 }), []);
+    });
+
+    it('searchWiki orders the strongest match first', () => {
+      const filler = 'lorem ipsum dolor sit amet consectetur adipiscing elit '.repeat(40);
+      page({ rel_path: 'weak.md', title: 'Weak', summary: null,
+             content: `one mention of mitochondria and then ${filler}`, content_hash: 'w' });
+      page({ rel_path: 'strong.md', title: 'Strong', summary: null,
+             content: 'mitochondria mitochondria mitochondria', content_hash: 's' });
+
+      const hits = store.searchWiki('mitochondria');
+      assert.equal(hits.length, 2);
+      assert.ok(hits[0].rank < hits[1].rank,
+        'ascending rank means the more negative score comes first, and bm25 gives the denser match the lower score');
+      assert.equal(hits[0].snippet?.includes('mitochondria'), true);
+    });
+
+    it('the snippet is taken from content, not from the title', () => {
+      page({ rel_path: 'col.md', title: 'Nothing Relevant',
+             summary: 'also nothing', content: 'the kryptonite factor is documented here',
+             content_hash: 'c' });
+      const hits = store.searchWiki('kryptonite');
+      assert.equal(hits.length, 1);
+      assert.match(hits[0].snippet ?? '', /kryptonite/,
+        'only content contains this term, so the snippet must have come from the content column');
+    });
+
+    it('searchWiki applies a default limit of ten', () => {
+      for (let i = 0; i < 12; i++) {
+        page({ rel_path: `p${i}.md`, title: `P${i}`, content: 'mitochondria', content_hash: `h${i}` });
+      }
+      assert.equal(store.searchWiki('mitochondria').length, 10);
+      assert.equal(store.searchWiki('mitochondria', { limit: 12 }).length, 12);
+    });
+
+    it('updateLearning keeps category when only the rule is supplied', () => {
+      const l = seed();
+      store.updateLearning(l.id, { rule: 'changed' });
+      assert.equal(store.getLearning(l.id)?.category, 'cat');
+      store.updateLearning(l.id, { category: null as unknown as string });
+      assert.equal(store.getLearning(l.id)?.category, 'cat');
     });
 
     it('searchWiki survives a query full of FTS5 metacharacters', () => {

@@ -18,6 +18,12 @@ const CONTEXT_FILES = ['CONTEXT.md', 'TODO.md', 'glossary.md'];
 const EVIDENCE_MIN_BYTES = 200;
 const EVIDENCE_MARKER = /VERIFIED|EXIT=|exit code|INFERENCE|미검증|commands?:/i;
 const HOME_PATH_EXEMPT = 'validate-context' + ':allow' + '-home-path';
+const AGENTS_RULE_HEADINGS = new Set([
+  '세션 시작 규칙 (점진적 노출)',
+  '세션 종료 게이트 (필수, 예외 없음)',
+  '보고 규칙 (전 세션 공통)',
+  '강제 장치 (규칙을 지킨다는 약속이 아니라 실제로 막는 곳)',
+]);
 // No \b here: JS word boundaries are [A-Za-z0-9_], so they never match after CJK.
 const ADR_STATUS = /^\s*[-*]?\s*상태\s*[:：]\s*(제안|채택|대체됨\s*\(\s*ADR-\d+\s*\)|폐기)[^\n]*$/m;
 
@@ -130,6 +136,69 @@ function check(rootArg) {
     }
     if (body.trim() === '') {
       fail('non-empty', 'empty', 'AGENTS.md', 'entry instructions are empty');
+    }
+  }
+
+  // Rule files: one source of truth, thin per-tool adapters. This is what makes
+  // behaviour identical regardless of which model or tool is driving the repo.
+  const claude = path.join(root, 'CLAUDE.md');
+  if (guard(claude, 'CLAUDE.md')) {
+    const body = fs.readFileSync(claude, 'utf8');
+    if (!/(^|\n)\s*@AGENTS\.md\b/.test(body)) {
+      fail('a `@AGENTS.md` import', 'absent', 'CLAUDE.md',
+        'CLAUDE.md must import AGENTS.md instead of restating rules; two copies drift apart');
+    }
+    const dupes = [...body.matchAll(/^##\s+(.+)$/gm)]
+      .map(m => m[1].trim())
+      .filter(h => {
+        if (AGENTS_RULE_HEADINGS.has(h)) return true;
+        return fs.existsSync(agents) && fs.readFileSync(agents, 'utf8').includes(`## ${h}`);
+      });
+    if (dupes.length) {
+      fail('no rule headings duplicated from AGENTS.md', dupes.join(', '), 'CLAUDE.md',
+        'CLAUDE.md restates rules that already live in AGENTS.md');
+    }
+  } else if (!fs.existsSync(claude)) {
+    fail('CLAUDE.md present', 'missing', 'CLAUDE.md',
+      'tool adapters must cover Claude Code as well as AGENTS.md readers');
+  }
+
+  // Session-end documentation harness: the gate that makes closing a session a
+  // machine-checked event instead of a habit.
+  const closeDocs = path.join(root, 'docs');
+  const prompt = path.join(closeDocs, 'next-session-prompt.md');
+  if (fs.existsSync(prompt)) {
+    const body = fs.readFileSync(prompt, 'utf8');
+    if (!/baseline/i.test(body)) {
+      fail('a `baseline` section', 'absent', 'docs/next-session-prompt.md',
+        'the next session cannot tell whether the baseline drifted without it');
+    }
+    if (body.trim().length < 200) {
+      fail(`>= 200 bytes`, `${Buffer.byteLength(body)} bytes`, 'docs/next-session-prompt.md',
+        'the handoff is too thin to resume from');
+    }
+    for (const name of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md']) {
+      const q = path.join(closeDocs, name);
+      if (!fs.existsSync(q)) fail(`${name} synced to docs/`, 'missing', `docs/${name}`,
+        'session-end docs must be synced to the docs root for the gate to see them');
+    }
+  } else {
+    fail('docs/next-session-prompt.md present', 'missing', 'docs/next-session-prompt.md',
+      'no session-end handoff exists; run the session-wrap harness before closing a session');
+  }
+
+  const sessionsRoot = path.join(closeDocs, 'sessions');
+  if (fs.existsSync(sessionsRoot)) {
+    const dated = fs.readdirSync(sessionsRoot)
+      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort();
+    if (dated.length) {
+      const latest = dated[dated.length - 1];
+      for (const name of ['DONE.md', 'TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md', 'next-session-prompt.md']) {
+        const q = path.join(sessionsRoot, latest, name);
+        if (!fs.existsSync(q)) fail(`${name} present`, 'missing', `docs/sessions/${latest}/${name}`,
+          'a dated session folder is incomplete');
+      }
     }
   }
 

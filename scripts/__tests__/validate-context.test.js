@@ -50,6 +50,23 @@ function makeProject(overrides = {}) {
     fs.writeFileSync(path.join(root, '.context', name), body);
   }
 
+  // default: a complete, gate-passing session-end handoff set
+  const handoff = { 'docs/next-session-prompt.md': '# handoff\n\nbaseline\n\n' + 'x'.repeat(240) + '\n' };
+  for (const n of ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md']) handoff[`docs/${n}`] = '# ok\n';
+  for (const [rel, body] of Object.entries(handoff)) {
+    if (overrides.omit?.some(f => rel.endsWith(f))) continue;
+    if (rel in (overrides.extraFiles ?? {})) continue;
+    fs.mkdirSync(path.join(root, path.dirname(rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), body);
+  }
+
+  if (!overrides.omit?.includes('CLAUDE.md') && !('CLAUDE.md' in (overrides.extraFiles ?? {}))) {
+    fs.writeFileSync(
+      path.join(root, 'CLAUDE.md'),
+      '@AGENTS.md\n\n## Tool-specific notes\n\nnot a project rule\n'
+    );
+  }
+
   if (overrides.extraFiles) {
     for (const [rel, body] of Object.entries(overrides.extraFiles)) {
       const target = path.join(root, rel);
@@ -558,4 +575,132 @@ test('an exemption surfaces the path it excuses, not just a line number', () => 
   assert.equal(exemptions.length, 1);
   assert.ok(exemptions[0].includes(MAC), `exemption must name the excused path, got: ${exemptions[0]}`);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+// --- the invariant that makes model-independence real rather than promised ---
+
+test('CLAUDE.md must import AGENTS.md rather than restating rules', () => {
+  const root = makeProject({
+    extraFiles: { 'CLAUDE.md': '# entry\n\nsome Claude-only note\n' },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('must import AGENTS.md')),
+    `expected an import report, got ${JSON.stringify(failures.map(f => f.msg))}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a missing CLAUDE.md is reported', () => {
+  const root = makeProject({ omit: ['CLAUDE.md'] });
+  const { failures } = check(root);
+  assert.ok(files(failures).includes('CLAUDE.md'));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a CLAUDE.md that duplicates an AGENTS.md rule heading is reported', () => {
+  const root = makeProject({
+    extraFiles: {
+      'AGENTS.md': '# rules\n\n## 보고 규칙 (전 세션 공통)\n\n' + 'x'.repeat(240) + '\n',
+      'CLAUDE.md': '@AGENTS.md\n\n## 보고 규칙 (전 세션 공통)\n\ncopied text\n',
+    },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('restates rules')),
+    `expected a duplication report, got ${JSON.stringify(failures.map(f => f.msg))}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a thin CLAUDE.md adapter with its own headings passes', () => {
+  const root = makeProject({
+    extraFiles: {
+      'AGENTS.md': '# rules\n\n## 보고 규칙 (전 세션 공통)\n\n' + 'x'.repeat(240) + '\n',
+      'CLAUDE.md': '@AGENTS.md\n\n## Claude Code 전용\n\nnotes that are not project rules\n',
+    },
+  });
+  const { failures } = check(root);
+  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the real repository keeps CLAUDE.md a thin adapter', () => {
+  const { failures } = check(path.join(__dirname, '..', '..'));
+  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
+});
+
+// --- session-end harness: closing a session is machine-checked ---
+
+const SESSION_DOCS = ['TICKETS.md', 'CONTEXT.md', 'TEST-LOG.md'];
+
+test('a missing next-session-prompt is reported', () => {
+  const root = makeProject({ omit: ['next-session-prompt.md'] });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('no session-end handoff exists')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff without a baseline section is reported', () => {
+  const root = makeProject({
+    extraFiles: { 'docs/next-session-prompt.md': '# handoff\n\ndo the thing\n' },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('cannot tell whether the baseline drifted')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff that is too thin to resume from is reported', () => {
+  const root = makeProject({
+    extraFiles: { 'docs/next-session-prompt.md': 'baseline ' + 'x'.repeat(80) },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('too thin to resume from')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+for (const name of SESSION_DOCS) {
+  test(`a handoff missing docs/${name} is reported`, () => {
+    const root = makeProject({
+      omit: [name],
+      extraFiles: {
+        'docs/next-session-prompt.md': `# handoff\n\nbaseline ${'x'.repeat(240)}\n`,
+      },
+    });
+    const { failures } = check(root);
+    assert.ok(files(failures).includes(`docs/${name}`),
+      `expected a report for ${name}, got ${JSON.stringify(files(failures))}`);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+}
+
+test('a complete handoff set passes', () => {
+  const body = `# handoff\n\nbaseline\n\n${'x'.repeat(240)}\n`;
+  const extra = { 'docs/next-session-prompt.md': body };
+  for (const n of SESSION_DOCS) extra[`docs/${n}`] = '# ok\n';
+  const root = makeProject({ extraFiles: extra });
+  const { failures } = check(root);
+  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('an incomplete dated session folder is reported', () => {
+  const root = makeProject({
+    extraFiles: { 'docs/sessions/2026-09-28/DONE.md': '# done\n' },
+  });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('dated session folder is incomplete')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a complete dated session folder passes', () => {
+  const extra = {};
+  for (const n of ['DONE.md', ...SESSION_DOCS, 'next-session-prompt.md']) {
+    extra[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+  }
+  const root = makeProject({ extraFiles: extra });
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('dated session folder')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the real repository satisfies the session-close gate', () => {
+  const { failures } = check(path.join(__dirname, '..', '..'));
+  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
 });

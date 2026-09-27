@@ -12,7 +12,8 @@
     "test": "node scripts/run-tests.js",
     "check": "tsc --noEmit",
     "validate:context": "node scripts/validate-context.js",
-    "verify": "npm run check && npm test && npm run validate:context"
+    "verify": "npm run check && npm test && npm run validate:context",
+    "session:close": "npm run validate:context"
   },
   "keywords": [
     "claude-code",
