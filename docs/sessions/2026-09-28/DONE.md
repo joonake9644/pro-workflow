@@ -17,6 +17,17 @@
 | skills/safe-mode/SKILL.md | 문서 예시 경로 `$HOME/...`로 포터블화 |
 | .context/{STATE,CONTEXT,TODO,glossary}.md | 신규. 세션 연속성 기록 |
 
+## 마지막 일감 (session-wrap 이후에 추가된 것)
+| 파일 | 변경 내용 |
+|------|-----------|
+| CLAUDE.md | 신규. `@AGENTS.md` 얇은 어댑터 |
+| scripts/validate-context.js | `session:close` 게이트 + 규칙 파일 불변식(CLAUDE.md import·제목 중복) 추가 |
+| scripts/run-tests.js | `__tests__/` 안의 비실행 파일 제외 (리뷰 major 1) |
+| src/db/__tests__/store.test.ts | rank 정렬·snippet 컬럼·WAL·기본 limit·category COALESCE 단언 추가 (리뷰 major 2) |
+| scripts/__tests__/run-tests.test.js | 신규 4 fixture |
+| AGENTS.md | 모델 비의존성 4원칙 + session:close 강제 장치 행 |
+| 커밋 | 3767650 |
+
 ## 결정사항
 - **테스트 스크립트를 자체 runner로 대체** — 이유: node 자체 `--test` glob은 node 20에서 실패实测(`globPatterns`는 v22.6.0+), `engines: >=18`과 충돌. 셸 glob은 깊이 1단계 고정이라 동일한 false-green 결함 재발.
 - **하네스는 `somatlas` 패턴만 채택** — 8KB 얕은 지도 + 결정론적 센서 + 전역 `session-wrap`. `planning-continuity-harness`의 `.harness/*.json` 전체 구조는 이 리포(소스 2,544줄)에 과중.

@@ -704,3 +704,64 @@ test('the real repository satisfies the session-close gate', () => {
   const { failures } = check(path.join(__dirname, '..', '..'));
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
 });
+
+// --- freshness: a handoff written before the last commit is not a handoff ---
+
+const { execFileSync } = require('node:child_process');
+
+function gitRepo(files = {}) {
+  const root = makeProject({ extraFiles: files });
+  execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'harness@example.invalid'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'harness'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: root, stdio: 'ignore' });
+  return root;
+}
+
+const HANDOFF_OK = extra => `# handoff\n\nbaseline\n\n${'x'.repeat(240)}\n${extra || ''}`;
+
+test('a handoff in a git repo that does not name the current commit is reported', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('predates the last commit')),
+    `expected a staleness report, got ${JSON.stringify(failures.map(f => f.msg))}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff that names the current commit passes', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
+    .toString().trim();
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
+
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')),
+      `named commit ${head} must satisfy the freshness rule`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff that names a stale commit is reported', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('predates the last commit')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff naming a longer sha still matches the short head', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const full = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim();
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${full}\n`));
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')),
+    'a full sha must satisfy a short-head comparison');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a non-git tree with a valid handoff is not failed for freshness', () => {
+  const root = makeProject();
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('predates the last commit')));
+  fs.rmSync(root, { recursive: true, force: true });
+});

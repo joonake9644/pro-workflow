@@ -22,6 +22,9 @@
    - `updateLearning`이 `project`를 COALESCE 목록에 넣지 않아 조용히 버리고 `true`를 반환한다
    - `src/db/store.ts:130` 부근. RED 테스트를 먼저 추가하고 최소 수정은 `project` 포함
    - project 변경을 금지해야 하는 호출부가 있는지 먼저 grep으로 확인
+2b. **`npm run session:close` 게이트 갱신** — 예상 시간: 20분
+   - 구조만 검사해서 **최신 커밋보다 오래된 종료 문서를 통과**시킨다. 이번 세션에 실제로 그랬다
+   - 종료 문서의 최종 커밋이 HEAD와 같은지 검사하는 freshness 규칙이 필요하다(#031)
 3. **#005 [Search] TDD** — 예상 시간: 90분
    - `src/search/fts.ts` 5개 함수. explore 서브에이전트로 API 맵 + 런타임 검증 확보
    - `searchWiki`와 다른 점: `fts.ts`는 `createStore`가 아니라 원시 `Database.Database` 핸들을 받는다
@@ -44,9 +47,10 @@
 
 ## baseline 상태
 <!-- npm run verify 결과 -->
-- passed: 210 / failed: 0 / suites: 16 / test files discovered: 9
+- passed: 225 / failed: 0 / suites: 16 / test files discovered: 9
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-09-28T00:20 (node v24.19.0, ABI 137)
+- 기록 시점 커밋: 3767650 (freshness 게이트는 이 커밋 이후의 새 커밋에서 다시 갱신을 요구한다)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
 ## ⚠️ 주의사항
@@ -57,7 +61,7 @@
 - **변조로 통과한 건 통과가 아니다.** 손으로 고른 뮤턴 목록을 커버리지로 보고하지 않는다.
 - **리뷰 프로세스는 권한 거부로 끊길 수 있다.** 완료 리포트가 실제로 나왔는지 확인하기 전까지
   "리뷰 완료"로 취급하지 않는다.
-- `AGENTS.md`는 8KB 캡의 89%다. 문장을 추가하기 전에 `.context/`로 경로를 참조한다.
+- `AGENTS.md`는 8KB 캡의 91%다. 문장을 추가하기 전에 `.context/`로 경로를 참조한다.
 
 ## 🔗 참고 문서
 - `docs/sessions/2026-09-28/TICKETS.md` — 전체 미완료 목록

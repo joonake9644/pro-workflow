@@ -187,6 +187,21 @@ function check(rootArg) {
       'no session-end handoff exists; run the session-wrap harness before closing a session');
   }
 
+  // Freshness: a session closed before the last commit is not a closed session.
+  // Only checked in a git checkout; a non-git tree is left alone.
+  if (fs.existsSync(prompt) && fs.existsSync(path.join(root, '.git'))) {
+    const head = gitHead(root);
+    const body = fs.readFileSync(prompt, 'utf8');
+    if (!head) {
+      fail('a readable git HEAD', 'unavailable', 'docs/next-session-prompt.md',
+        'cannot verify that the session handoff matches the current commit');
+    } else if (!hasHeadRef(body, head)) {
+      fail(`the current commit ${head} named in the handoff`, 'absent or stale',
+        'docs/next-session-prompt.md',
+        'the session handoff predates the last commit; re-run the session-end harness');
+    }
+  }
+
   const sessionsRoot = path.join(closeDocs, 'sessions');
   if (fs.existsSync(sessionsRoot)) {
     const dated = fs.readdirSync(sessionsRoot)
@@ -335,6 +350,27 @@ function check(rootArg) {
   }
 
   return { failures, exemptions };
+}
+
+function gitHead(root) {
+  try {
+    const out = require('child_process')
+      .execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+// Accept a full 40-char sha as well as the 7-char short form: compare the short
+// head against the prefix of each hex token rather than requiring a word boundary.
+function hasHeadRef(text, head) {
+  for (const token of text.match(/\b[0-9a-f]{7,40}\b/gi) || []) {
+    if (token.toLowerCase().startsWith(head.toLowerCase())) return true;
+  }
+  return false;
 }
 
 function isSymlink(p) {

@@ -9,10 +9,11 @@
 - 최초 상태에서 `src/db/__tests__/`에 테스트를 추가해도 **14 pass / 0 fail** — 실행조차 안 됨
 
 ### 세션 종료 후 (2026-09-28T00:20, node v24.19.0)
-- passed: 210 / failed: 0 / suites: 16
+- passed: 225 / failed: 0 / suites: 16
 - 명령: `npm run verify` (check + test + validate:context) — **exit 0**
 - 발견된 테스트 파일: 9
-- `validate-context`: OK, AGENTS.md 7,280 bytes (8KB 캡의 89%)
+- `validate-context`: OK, AGENTS.md 7,451 bytes (8KB 캡의 91%)
+- 커밋: 3767650
 
 ### 다중 버전 (ABI별 `npm rebuild better-sqlite3` 후)
 - node v20.11.0 / v22.17.0 / v24.19.0 모두 동일 게이트 통과 확인
@@ -30,6 +31,12 @@
 - [ ] **CI 실제 실행** — `actions/runs total_count = 0`. 로컬에서 재실행 불가
 - [ ] **node 18 CI 레그** — 이 환경에 node 18 없음
 - [ ] **#016 증거 커밋 연결, #017 ADR 교차검사** — 미구현이라 테스트도 없다
+
+## 세션 종료 문서의 공백 (자기 발견)
+`session-wrap`을 **마지막 일감보다 먼저** 실행했다. 이후에 `CLAUDE.md`, `session:close`
+게이트, 독립리뷰 major 2건 수정이 들어갔는데 종료 문서는 갱신되지 않았다(210 pass 기록,
+최종 실측 220 pass). 더 나쁜 것은 **그 문서가 게이트를 통과했다**는 점이다 — 센서가
+구조만 검사해서 최신 커밋보다 오래된 종료 문서를 막지 못한다. TODO #031.
 
 ## 테스트하지 못한 영역
 - `src/search/fts.ts`(5개 함수, 320줄) — 커버리지 0. `getRelatedLearnings`의 `SQLITE_ERROR` 버그는
