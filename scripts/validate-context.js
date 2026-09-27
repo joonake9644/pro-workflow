@@ -247,23 +247,35 @@ function check(rootArg) {
   }
 
   const sessionsRoot = path.join(closeDocs, 'sessions');
-  if (fs.existsSync(sessionsRoot)) {
-    const dated = fs.readdirSync(sessionsRoot)
-      .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort();
-    if (dated.length) {
+  const dated = fs.existsSync(sessionsRoot)
+    ? fs.readdirSync(sessionsRoot).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort()
+    : [];
+  if (!dated.length) {
+    fail('a dated folder under docs/sessions/', 'none', 'docs/sessions/',
+      'a session cannot be closed without a dated snapshot; without one the review and completeness rules never run');
+  } else {
+    {
       const latest = dated[dated.length - 1];
       for (const name of SESSION_FILES) {
         const q = path.join(sessionsRoot, latest, name);
         if (!fs.existsSync(q)) fail(`${name} present`, 'missing', `docs/sessions/${latest}/${name}`,
           'a dated session folder is incomplete');
       }
-      const reviewPath = path.join(sessionsRoot, latest, 'REVIEW.md');
-      const review = fs.existsSync(reviewPath) ? fs.readFileSync(reviewPath, 'utf8') : '';
-      if (fs.existsSync(reviewPath) && !/REVIEW_(RESULT|MODEL)\s*[:=]/.test(review)) {
-        fail('a `REVIEW_RESULT:` or `REVIEW_MODEL:` line', 'absent',
-          `docs/sessions/${latest}/REVIEW.md`,
-          'AGENTS.md makes an independent review mandatory at session close; the artifact must record it');
+      // Both halves are required. An alternation let a REVIEW.md record which model ran
+      // while recording nothing about the outcome, which is the exact gap AGENTS.md
+      // claims to close.
+      for (const [rel, body] of [
+        [`docs/sessions/${latest}/REVIEW.md`, path.join(sessionsRoot, latest, 'REVIEW.md')],
+        ['docs/REVIEW.md', path.join(closeDocs, 'REVIEW.md')],
+      ]) {
+        if (!fs.existsSync(body)) continue;
+        const text = fs.readFileSync(body, 'utf8');
+        for (const label of ['REVIEW_MODEL', 'REVIEW_RESULT']) {
+          if (!new RegExp(`${label}\\s*[:=]`).test(text)) {
+            fail(`a \`${label}:\` line`, 'absent', rel,
+              'an independent review is mandatory at session close; the artifact must name the model and record its verdict');
+          }
+        }
       }
     }
   }

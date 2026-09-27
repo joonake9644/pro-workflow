@@ -21,8 +21,9 @@
 
 ## 세션 시작 규칙 (점진적 노출)
 
-이 파일은 매 세션 통째로 읽히므로 8KB 이하를 유지한다
-(`npm run validate:context`가 검사). 세부는 경로로만 가리킨다.
+이 파일은 매 세션 통째로 읽히므로 **150줄 이하**를 유지한다(하드). 8KB는 advisory, 절대 한계는
+12KB다. 세 값 모두 `npm run validate:context`가 검사한다. 세부는 경로로만 가리킨다.
+2026-07 Red Hat 가이드는 예산을 바이트가 아니라 **줄**로 제시한다("150줄 미만").
 
 1. `.context/STATE`의 `checkpoint`와 `blockers`만 읽는다 (한 줄 JSON).
 2. 그다음 `.context/TODO.md`에서 `todo_active`의 stage를 확인한다.
@@ -97,16 +98,16 @@
 | 컨텍스트 파일이 유효할 것 | `npm run validate:context` → `scripts/validate-context.js` |
 | 이 세 가지를 한 번에 | `npm run verify` (check → test → validate:context) |
 | 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋이 handoff에 기록됨. 위반 시 exit 1 (`npm run session:close`) |
-| 독립 리뷰가 실제로 돌아갔는가 | `docs/sessions/<날짜>/REVIEW.md`에 `REVIEW_MODEL`·`REVIEW_RESULT`. 규칙만 있고 결과물이 없으면 실패 |
+| 독립 리뷰가 실제로 돌아갔는가 | 날짜 폴더와 `docs/REVIEW.md` 양쪽에 `REVIEW_MODEL`·`REVIEW_RESULT` **둘 다** 있어야 한다. 하나만 있으면 실패 |
+| 날짜 스냅샷 없이 세션이 안 닫혔는가 | `docs/sessions/<날짜>/` 폴더가 없으면 실패 — 폴더가 없으면 리뷰 규칙이 아예 돌지 않는다 |
 | 이력 문서가 현재본을 덮지 않음 | `docs/DONE.md` 금지. DONE은 날짜 폴더 전용 (20개 프로젝트 중 15개가 루트에 없음) |
 | 이 문서가 규칙의 유일한 원본 | `validate-context`의 CLAUDE.md import·중복 검사 |
 
-`scripts/validate-context.js`가 검사하는 것: AGENTS.md 8KB 캡과 200B 하한, `CLAUDE.md`가
-`@AGENTS.md`를 import 하고 규칙을 복사하지 않았음, `.context/STATE`의 필수 7개 필드와 타입,
-`todo_active`이 TODO.md에 실제로 존재함, 심볼릭 링크가 저장소를 벗어나지 않음, 가짜 증거 차단,
-ADR 상태 라인, CONTEXT/TODO/glossary의 존재·비어있지 않음, 커밋되는 문서 전체에
-절대 홈경로(`/Users/<이름>/`·`/home/<이름>/`·`C:\Users\<이름>\`)가 없는 것. 위반 시 고칠 파일·예상값·실제값을 출력하고
-exit 1. AI 호출과 네트워크를 쓰지 않는다.
+`scripts/validate-context.js`가 검사하는 것: AGENTS.md 150줄 하드·12KB 절대·8KB advisory·200B 하한,
+`CLAUDE.md`의 `@AGENTS.md` import와 규칙 비중복, `.context/STATE` 7필드 타입, `todo_active`이
+TODO.md에 존재, 심볼릭 링크가 저장소를 벗어나지 않음, 가짜 증거 차단, ADR 상태 라인,
+CONTEXT/TODO/glossary 존재·비어있지 않음, 커밋되는 문서 전체의 절대 홈경로 없음. 위반 시 고칠 파일·
+예상값·실제값을 출력하고 exit 1. AI 호출과 네트워크를 쓰지 않는다.
 
 pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 설정되어 있지 않고
 `scripts/commit-validate.js`도 opt-in(`scripts/setup-hook.js`) 구조라, Git 훅 경로는
@@ -119,4 +120,4 @@ pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 
 
 거부된 항목, 부분 구현, 스코프 밖으로 남긴 이유, 그리고 미검증 항목을 `.context/TODO.md`
 (#016~#030) 와 `.context/CONTEXT.md`의 "미검증 항목" 절에 적었다. 새 항목을 여기에 복사하지
-않고 거기 references만 둔다. 상세 목록을 이 파일에 복사하면 이 파일이 8KB 캡을 넘긴다.
+않고 거기 references만 둔다. 상세 목록을 이 파일에 복사하면 150줄 하드 캡을 넘긴다.

@@ -682,7 +682,10 @@ test('a complete handoff set passes', () => {
   // this test builds the dated folder itself
   const extra = { 'docs/next-session-prompt.md': HANDOFF_OK() };
   for (const n of SESSION_DOCS) extra[`docs/${n}`] = '# ok\n';
-  const root = makeProject({ datedSession: false, extraFiles: extra });
+  extra['docs/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  for (const n of SESSION_FILES) extra[`docs/sessions/2026-09-28/${n}`] = '# ok\n';
+  extra['docs/sessions/2026-09-28/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
+  const root = makeProject({ extraFiles: extra });
   const { failures } = check(root);
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
   fs.rmSync(root, { recursive: true, force: true });
@@ -825,7 +828,7 @@ test('a REVIEW.md without a verdict line is reported', () => {
   extra['docs/REVIEW.md'] = '# review\n\nlooked fine\n';
   const root = makeProject({ datedSession: false, extraFiles: extra });
   const { failures } = check(root);
-  assert.ok(msgs(failures).some(m => m.includes('must record it')));
+  assert.ok(msgs(failures).some(m => m.includes('independent review is mandatory')));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -839,7 +842,7 @@ test('a REVIEW.md carrying a verdict passes', () => {
   extra['docs/REVIEW.md'] = 'REVIEW_MODEL: m\nREVIEW_RESULT: clean\n';
   const root = makeProject({ datedSession: false, extraFiles: extra });
   const { failures } = check(root);
-  assert.ok(!msgs(failures).some(m => m.includes('must record it')));
+  assert.ok(!msgs(failures).some(m => m.includes('independent review is mandatory')));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -878,4 +881,63 @@ test('the real entry doc is inside both the line and byte budgets', () => {
   const { failures, advisories } = check(path.join(__dirname, '..', '..'));
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
   assert.deepEqual(advisories, [], JSON.stringify(advisories, null, 2));
+});
+
+// --- the pathspec exclusion is the rule's core behaviour and was untested ---
+
+function writeIn(root, rel, body) {
+  const target = path.join(root, rel);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, body);
+}
+
+function commit(root, paths) {
+  execFileSync('git', ['add', '-A', '--', ...paths], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-q', '-m', `commit ${paths.join(' ')}`], { cwd: root, stdio: 'ignore' });
+  return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root }).toString().trim();
+}
+
+test('a docs-only commit after product work does not invalidate the handoff', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  writeIn(root, 'src/feature.ts', 'export const x = 1;\n');
+  const product = commit(root, ['src/feature.ts']);
+
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${product}\n`));
+  commit(root, ['docs/next-session-prompt.md']);
+
+  const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root }).toString().trim();
+  assert.notEqual(head, product, 'the docs commit must be a distinct commit for this test to mean anything');
+
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
+    `a docs-only commit must not stale the handoff, but it did: ${JSON.stringify(failures.map(f => f.msg))}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a handoff naming the commit before product work is reported', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const before = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root }).toString().trim();
+
+  writeIn(root, 'src/feature.ts', 'export const y = 2;\n');
+  commit(root, ['src/feature.ts']);
+
+  const { failures } = check(root);
+  assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+    'a handoff naming the pre-product commit must be reported stale');
+  assert.ok(failures.some(f => f.expected.includes(before) || f.expected.includes('newest product change')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a .context-only change does not stale the handoff either', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  writeIn(root, 'src/feature.ts', 'export const z = 3;\n');
+  const product = commit(root, ['src/feature.ts']);
+
+  fs.writeFileSync(path.join(root, '.context', 'glossary.md'), '# g\nterm: a definition\n');
+  commit(root, ['.context/glossary.md']);
+
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${product}\n`));
+  const { failures } = check(root);
+  assert.ok(!msgs(failures).some(m => m.includes('predates product work')));
+  fs.rmSync(root, { recursive: true, force: true });
 });

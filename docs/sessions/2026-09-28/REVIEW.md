@@ -1,46 +1,49 @@
-# REVIEW — 2026-09-28
+# REVIEW — 2026-09-28 (종료 게이트 최종)
 
 TOOL_LABEL: opencode
 REVIEW_MODEL: opencode-go/deepseek-v4.1-flash
-REVIEW_SCOPE: 7fa2872..HEAD (dc94a71, 84a1381, 45a9c75, 3767650, 이후 변경분)
-REVIEW_METHOD: `opencode run --model opencode-go/deepseek-v4.1-flash` 별도 프로세스.
-  리뷰어에게 "작성자를 신뢰하지 말고 동기 부여 설명도 검증 대상"을 지시하고 파일 생성을 금지했다.
+REVIEW_SCOPE: 3767650..HEAD — 문서 하네스 정렬 커밋 4efbdf9 및 종료 게이트 규칙
+REVIEW_METHOD: `opencode run --model opencode-go/deepseek-v4.1-flash` 별도 프로세스. 파일 생성 금지.
 REVIEW_RESULT: majors-fixed, minors-deferred
 
-## 실행 기록 (3회)
+## 실행 기록 (총 4회)
 
 | # | 대상 | 완주 | 출력 | blocker | major | minor | nit |
 |---|------|------|------|---------|-------|-------|-----|
 | 1 | `dc94a71` | **미완** | 권한 거부로 중단 | — | — | — | — |
 | 2 | 하네스 작업분 | 완주 | 688줄 | 0 | 1 | 7 | 3 |
-| 3 | 세션 종료 전 전체 | 완주 (`REVIEW-COMPLETE` 마커 확인) | 1390줄 | 0 | 2 | 9 | 0 |
+| 3 | 세션 중간 전체 | 완주 (마커 확인) | 1390줄 | 0 | 2 | 9 | 0 |
+| 4 | 문서 하네스 + 종료 게이트 | 완주 (마커 확인) | 1045줄 | 0 | 4 | 8 | 2 |
 
-1회는 **완료된 리뷰가 아니다.** 부분 결과를 완료처럼 취급하지 않고 재실행했다. 이것이
-`AGENTS.md`의 "리뷰 실측 확인" 항목이 실제로 발동한 사례다.
+1회는 **완료된 리뷰가 아니다.** 부분 결과를 완료처럼 취급하지 않고 재실행했다.
 
-## major 처리 (수정 완료)
+## major 4건 — 전부 수정 (게이트 규칙상 필수)
 
-| # | finding | 메인 재현 | 처리 |
-|---|---------|-----------|------|
-| 2-1 | 홈경로 정규식이 `key=/Users/<name>`·`home:/Users/<name>`·후행슬래시 없음·Windows 정슬래시 7종을 모두 놓침 | 모듈에서 추출한 정규식으로 7케이스 전부 미탐지 확인 | 구분자 클래스 → lookbehind로 교체. 엔드투엔드 13케이스: 검출 9 전부, 오탐 4건 0 |
-| 3-1 | `run-tests.js`가 `__tests__/` 안의 **모든 파일**을 수집 → `NOTES.md` 한 장으로 `npm test` 전체가 `ERR_UNKNOWN_FILE_EXTENSION`로 사망 | `NOTES.md` 주입 → `npm_test_exit=1` 확인 | 실행 가능한 확장자만 수집. 회귀 테스트 4건 |
-| 3-2 | `store.test.ts`가 rank 정렬·snippet 컬럼·WAL·기본 limit·category COALESCE를 검증하지 않음. 게다가 주석이 "best-first를 고정한다"고 거짓 주장 | `ORDER BY rank DESC` 주입 → 51/51 통과(미검출) 확인 | 단언 5종 추가 + 거짓 주석 제거. 리뷰어 지목 5개 뮤턴 전부 검출 확인 |
+| finding | 메인 재현 | 수정 | 고정 증거 |
+|---------|-----------|------|---------|
+| 판정 정규식이 교집합이 아니라 **대안** — `REVIEW_MODEL`만 있어도 통과 | `node -e`로 `REVIEW_MODEL: m` 단독 → true | 두 라벨을 각각 요구 | 뮤테이션 시 1 fail |
+| 날짜 폴더 검사와 REVIEW 내용 검사가 `existsSync` 안에 있어 **조건부** — 폴더가 없으면 검사 자체가 안 돔. root `docs/REVIEW.md` 내용은 아예 안 읽음 | 폴더 없는 임시 트리 + REVIEW.md 1줄 → **exit 0** | 폴더 부재를 실패로, root REVIEW.md 내용도 동일 규칙으로 | 뮤테이션 시 2 fail |
+| AGENTS.md 3곳이 "8KB 캡을 검사한다"고 서술하나 코드는 8KB를 advisory로 강등하고 150줄 하드·12KB 절대를 추가 | `bytes 7866`에서 failures 0 | 문구를 실제 강제에 맞춤. advisory가 다시 울려 8KB 아래로 압축 | `violations 0 / advisories 0` |
+| freshness의 **pathspec 제외가 테스트로 고정되지 않음** — 모든 fixture에서 `productHead === gitHead`여서 제외가 구별되지 않음 | 리뷰어 실행으로 확인 | 제품 커밋 후 docs-only 커밋 fixture 3건 추가 | 뮤테이션(제외 제거) 시 **6 fail** |
 
-## 기록 정정
+## 이번 리뷰가 가르친 것
 
-`CONTEXT.md`에 "뮤테이션 8/8 검출"이라고 적었으나, 그 8건은 손으로 고른 목록이었고
-커버리지 측정이 아니었다. 리뷰어가 내가 *하지 않은* 뮤턴 5건을 찾아 통과함을 확인했다.
-**변조 통과를 통과로 보고하지 않는 것**을 이 세션의 실측 교훈으로 남겼다.
+- **교집합을 대안으로 쓰면 게이트가 구멍이 된다.** `A|B`는 "둘 중 하나"인데 문서에는 "둘 다"라 적혀 있었다.
+- **검사가 조건부이면 없는 게 통과가 된다.** 폴더가 없으면 REVIEW 규칙이 아예 실행되지 않는다.
+- **테스트는 규칙의 코드가 아니라 차이를 재야 한다.** freshness 규칙의 핵심인 pathspec 제외가 테스트에서
+  관측되지 않고 있었다. 규칙이 "있다"고 믿는 것과 "검증된다"는 다른 말이다.
+- 문서와 코드가 어긋난 채로는 규칙이 없는 것보다 나쁘다. 유지자가 존재하지 않는 8KB 캡을 믿고
+  12KB까지 키울 수 있다.
 
 ## minor / nit (미수정, 사유)
 
-- `ci.test.ts`가 `|| :`·`; true` 무음화를 잡지 못함 → TODO #023
-- `package.json`의 `files`가 `scripts`를 포함해 검증 스크립트가 npm 배포물에 실림 → TODO #024
-- 나머지 minor는 "감소됨(소유자에 기록)" 판단으로 TODO에 사유와 함께 남김
+`session:close` 게이트가 `docs/REVIEW.md`의 `REVIEW_MODEL` 값을 형식 검증하지 않는다(무슨 문자열이든 통과).
+도구 라벨 값의 화이트리스트는 일부 프로젝트만 두므로 범위를 넓히지 않았다. `validate-context`가
+advisory를 별도 배열로 돌려주는 구조라 이를 main 출력과 분리하는 것은 검토 대상.
+나머지 minor/nit는 사유와 함께 `.context/TODO.md`에 남김.
 
 ## 미검증 (리뷰어가 못 한 것)
 
-- GitHub Actions 실제 실행 — fork의 push 트리거가 비활성이라 run이 0건
+- GitHub Actions 실제 실행 — fork의 push 트리거 비활성이라 run 0건
 - Node 18 레그 — 이 환경에 미설치
-- `npm pack` 산출물(nit 하나)
-- 깨진 심볼릭 링크 디스크 재현 — 리뷰어에 파일 생성 금지 규칙 때문이라 INFERENCE로 남음
+- TOOL_LABEL 값의 실제 허용 목록 — 전역 설정과 프로젝트 규칙이 갈리는 지점이 있어 단일 진본이 없음

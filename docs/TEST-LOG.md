@@ -9,7 +9,7 @@
 - 최초 상태에서 `src/db/__tests__/`에 테스트를 추가해도 **14 pass / 0 fail** — 실행조차 안 됨
 
 ### 세션 종료 후 (2026-09-28T00:20, node v24.19.0)
-- passed: 225 / failed: 0 / suites: 16
+- passed: 239 / failed: 0 / suites: 16
 - 명령: `npm run verify` (check + test + validate:context) — **exit 0**
 - 발견된 테스트 파일: 9
 - `validate-context`: OK, AGENTS.md 7,451 bytes (8KB 캡의 91%)
