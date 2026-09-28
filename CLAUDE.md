@@ -1,3 +1,5 @@
+@.plan/CAPSULE.md
+
 @AGENTS.md
 
 # pro-workflow-lab — Claude Code 진입점
