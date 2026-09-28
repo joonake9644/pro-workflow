@@ -68,9 +68,8 @@
 5. **체크포인트 갱신.** `.context/STATE`와 `.context/CONTEXT.md`에 리뷰 결과와
    미해결 항목을 기록한다. 미검증 항목은 반드시 "미검증"으로 남긴다.
 
-6. **사용자에게 보고.** 실제 명령 출력으로 뒷받침된 것만 보고한다. 추측·예측을
-   결과로 제시하지 않는다. 무엇을 검증했고 무엇을 검증하지 못했는지 구분해
-   明시한다.
+6. **사용자에게 보고.** 실측으로 뒷받침된 것만 보고한다. 무엇을 검증했고
+   무엇을 검증하지 못했는지 구분해 明시한다.
 
 ### 리뷰 결과 처리 규칙
 
@@ -97,7 +96,7 @@
 | CI가 테스트를 돌릴 것 | `.github/workflows/ci.yml`의 `Run tests` 스텝. 제거하거나 matrix job 밖으로 옮기면 `src/__tests__/ci.test.ts`가 실패 |
 | 컨텍스트 파일이 유효할 것 | `npm run validate:context` → `scripts/validate-context.js` |
 | 이 세 가지를 한 번에 | `npm run verify` (check → test → validate:context) |
-| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋이 handoff에 기록됨. 위반 시 exit 1 (`npm run session:close`) |
+| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋 기록. 종료 게이트는 handoff의 테스트 수치를 **실측과 대조**한다 — sha가 있어도 숫자가 틀리면 exit 1 (`npm run session:close`) |
 | 독립 리뷰가 실제로 돌아갔는가 | 날짜 폴더와 `docs/REVIEW.md` 양쪽에 `REVIEW_MODEL`·`REVIEW_RESULT` **둘 다** 있어야 한다. 하나만 있으면 실패 |
 | 날짜 스냅샷 없이 세션이 안 닫혔는가 | `docs/sessions/<날짜>/` 폴더가 없으면 실패 — 폴더가 없으면 리뷰 규칙이 아예 돌지 않는다 |
 | 이력 문서가 현재본을 덮지 않음 | `docs/DONE.md` 금지. DONE은 날짜 폴더 전용 (20개 프로젝트 중 15개가 루트에 없음) |
