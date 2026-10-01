@@ -725,15 +725,22 @@ const { execFileSync } = require('node:child_process');
 // the variable first — otherwise running the suite in CI (which is exactly what happens)
 // turns its own expectations inside out. Local runs and CI runs then agree.
 function withoutCI(fn) {
-  const prevCI = process.env.CI;
-  const prevGH = process.env.GITHUB_ACTIONS;
+  // GITHUB_REF matters too: the exemption keys off refs/pull/* first, so clearing only
+  // CI/GITHUB_ACTIONS left it active when the suite ran on a real PR.
+  const saved = {
+    CI: process.env.CI,
+    GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+    GITHUB_REF: process.env.GITHUB_REF,
+  };
   delete process.env.CI;
   delete process.env.GITHUB_ACTIONS;
+  delete process.env.GITHUB_REF;
   try {
     return fn();
   } finally {
-    if (prevCI !== undefined) process.env.CI = prevCI;
-    if (prevGH !== undefined) process.env.GITHUB_ACTIONS = prevGH;
+    for (const k of Object.keys(saved)) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
   }
 }
 
@@ -795,49 +802,90 @@ test('a non-git tree with a valid handoff is not failed for freshness', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a CI run is not failed for freshness, because the merge commit cannot be in the handoff', () => {
-  // GitHub builds a synthetic merge commit for the PR. `git log -1 -- . :!docs :!.context`
-  // returns that sha in CI, and it is by definition newer than anything the branch author
-  // could have written into the handoff. VERIFIED on run 36831658193: the gate asked for
-  // 728bee0, which does not exist in the author's clone at all.
+// Set/unset several env vars for one test, restoring exactly what was there before.
+function withEnv(env, fn) {
+  const saved = {};
+  for (const k of Object.keys(env)) {
+    saved[k] = process.env[k];
+    if (env[k] === undefined) delete process.env[k]; else process.env[k] = env[k];
+  }
+  try {
+    return fn();
+  } finally {
+    for (const k of Object.keys(env)) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  }
+}
+
+test('a PR merge checkout is not failed for freshness, because the merge commit cannot be in the handoff', () => {
+  // GitHub builds a synthetic merge commit for the PR and names the case with
+  // GITHUB_REF=refs/pull/N/merge. `productHead` returns that sha, which is by definition
+  // newer than anything the branch author could have written into the handoff. VERIFIED on
+  // run 36831658193: the gate asked for 728bee0, absent from the author's clone entirely.
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
     .toString().trim();
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
 
-  const prev = process.env.CI;
-  process.env.CI = 'true';
-  try {
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/pull/1/merge', CI: 'true' }, () => {
     const { failures, advisories } = check(root);
     assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
-      'CI must judge the branch as written, not against a commit it just synthesised');
-    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified in CI')),
+      'the PR merge checkout must not be judged against a commit it just synthesised');
+    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified')),
       'the exemption must be visible, not a silent pass — an unseen skip reads as a satisfied check');
-  } finally {
-    if (prev === undefined) delete process.env.CI; else process.env.CI = prev;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  });
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a GITHUB_ACTIONS-only run is exempt too, since GitHub documents CI as overwritable', () => {
+test('a push to main is still checked, because its commit is real and nameable', () => {
+  // Keying the exemption off `CI` alone would disable freshness on main pushes too, where
+  // it is perfectly satisfiable. GITHUB_REF=refs/heads/... must keep the rule running.
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
+
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
+    const { failures } = check(root);
+    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+      'a stale handoff on a main push must still be reported, not silently exempted');
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a synthetic merge is detected by parent count when GITHUB_REF is absent', () => {
+  // Fallback for a CI that checks out a merge commit without naming the ref.
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  // Read the initial branch rather than assuming master/main — `git init` default varies.
+  const base = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root })
+    .toString().trim();
+  execFileSync('git', ['checkout', '-q', '-b', 'topic'], { cwd: root, stdio: 'ignore' });
+  writeIn(root, 'src/feature.ts', 'export const x = 1;\n');
+  execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-q', '-m', 'topic work'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['checkout', '-q', base], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['merge', '--no-ff', '--no-edit', '-q', 'topic'], { cwd: root, stdio: 'ignore' });
+
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: undefined, CI: 'true' }, () => {
+    const { failures, advisories } = check(root);
+    assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
+      'a two-parent HEAD in CI is the synthetic merge; it must be exempt');
+    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified')));
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('CI=false opts out, so the exemption is not triggered by a falsy value', () => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
     .toString().trim();
-  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
 
-  const prevCI = process.env.CI;
-  const prevGH = process.env.GITHUB_ACTIONS;
-  delete process.env.CI;
-  process.env.GITHUB_ACTIONS = 'true';
-  try {
+  withEnv({ CI: 'false', GITHUB_ACTIONS: undefined, GITHUB_REF: undefined }, () => {
     const { failures } = check(root);
-    assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
-      'GITHUB_ACTIONS alone must be enough to detect the synthetic merge commit');
-  } finally {
-    if (prevCI !== undefined) process.env.CI = prevCI;
-    if (prevGH === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = prevGH;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+      'CI=false means "not CI", so freshness must run');
+  });
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('CI still enforces every other rule, so the exemption is only about freshness', () => {
