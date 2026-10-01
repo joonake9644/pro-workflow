@@ -52,7 +52,7 @@ handoff가 이름 붙일 방법이 없다. CI에서 freshness를 면제(advisory
 - passed: 391 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
-- 제품 커밋: baab3d2 (CI freshness 면제 + engines >=20, 매트릭스 [20,22,24] + #035 종료)
+- 제품 커밋: fae559b (CI freshness 면제 + engines >=20 + entry-doc 테스트 스코프 한정)
 - 직전 제품 커밋: 885fe65 (optimizer LLM/store TDD + storage 결함 5건 + gate TAP 수정)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
