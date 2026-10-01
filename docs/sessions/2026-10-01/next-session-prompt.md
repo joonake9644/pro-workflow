@@ -50,10 +50,10 @@ IF NOT EXISTS`가 기존 DB에 CHECK를 소급하지 않으므로, 이미 생성
 
 ## baseline 상태
 <!-- npm run verify 결과 -->
-- passed: 391 / failed: 0 / suites: 35 / test files discovered: 15
+- passed: 393 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
-- 제품 커밋: fae559b (CI freshness 면제 + engines >=20 + entry-doc 테스트 스코프 한정)
+- 제품 커밋: 1032352 (freshness 면제를 PR merge로 한정 + advisory 가시성 + engines 범위)
 - 직전 제품 커밋: baab3d2 (CI freshness 면제 + #035 종료)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
