@@ -4,10 +4,10 @@
 
 ### 최우선 — 이번에 고친 게이트가 CI에서 도는지 확인해야 한다
 
-- [ ] **#007 CI 실행 실증 (진행 중)** — PR #1 생성, 첫 실행은 freshness 게이트의 PR 구조 문제로
-  실패. CI 면제로 수정한 뒤 **재실행 결과 미확인**. 다음 세션에서 `gh run list`로 확인할 것.
-  로컬 `CI=true`/`GITHUB_ACTIONS=true` 재현으로는 통과를 확인했으나, 실제 Actions의 env와
-  checkout ref 차이는 **미검증**
+- [✓] **#007 CI 실행 실증 — 종료 2026-10-01.** PR #1 run 36860867596: 3레그(20/22/24) 전부 success,
+  각 레그 `Session close gate` success(`live run: passed 391 / failed 0 / suites 35 / test files 15`).
+  freshness advisory가 CI에서 실제로 출력되는 것도 로그로 확인
+  (`[ADVISORY] ... handoff freshness is not verified in CI`)
 - [✓] **#035 node 18 검증 — 종료 2026-10-01.** run 36831658193의 build(18)이 `npm ci`에서
   `EBADENGINE`(better-sqlite3@12.8.0 required `20.x||...`, current `v18.20.8`)로 65초 후 canceled.
   사용자 승인 후 `engines`를 `>=20`, 매트릭스를 `[20, 22, 24]`로 변경. 선언과 실제를 일치시켰다
