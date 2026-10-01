@@ -3,11 +3,12 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 # 다음 세션 작업 지시서 — 2026-10-01 이후
 
 ## 🎯 다음 세션 목표
-`#028`의 남은 조각 — `wiki_seeds.status` CHECK 제약 마이그레이션을 끝낸다. `CREATE TABLE
-IF NOT EXISTS`가 기존 DB에 CHECK를 소급하지 않으므로, 이미 생성된 DB는 애플리케이션 가드로만
-보호된다. 실제 DB에 CHECK가 있는지 확인하고 테이블 재생성 마이그레이션을 쓴다.
+`#039` `claimPendingSeed`의 동시성 경계를 정한다. 트랜잭션 래퍼도 UNIQUE 제약도 없어 문장
+원자성에만 의존하고, 바깥 `UPDATE`에 `status = 'pending'` 재확인이 없다. peek-claim으로
+리팩터하면 이중 claim이 재현된다(리뷰어가 changes 1/1 실측). 손대기 전에 재확인을 먼저 붙인다.
 
 ## ✅ 직전 세션(2026-10-01)에서 끝난 것
+- **#028 종료** — status 제약을 CHECK 대신 트리거로. 기존 DB까지 적용된다
 - **#007 CI 실증 완료** — PR #1 run 36860867596, 3레그(20/22/24) 전부 success
 - **#035 node 18 종료** — engines `>=20`, 매트릭스 `[20,22,24]`
 - #006 optimizer TDD(뮤턴 25/25) · #026~#030 Storage 결함 5건(뮤턴 17/17)
@@ -16,7 +17,7 @@ IF NOT EXISTS`가 기존 DB에 CHECK를 소급하지 않으므로, 이미 생성
 ## ⚡ 즉시 시작 명령
 ```
 세션 이어받기. 프로젝트: /Users/joonake/Developer/projects/pro-workflow-lab  # validate-context:allow-home-path
-오늘 할 것: #028 CHECK 제약 마이그레이션 (기존 DB에 status CHECK가 적용되는지 확인)
+오늘 할 것: #039 claimPendingSeed 동시성 (UPDATE에 status 재확인부터)
 먼저 git fetch 후 동기화 확인, 그 다음 npm run verify.
 ```
 
@@ -28,11 +29,7 @@ IF NOT EXISTS`가 기존 DB에 CHECK를 소급하지 않으므로, 이미 생성
 2. **PR #1 처리** — 예상 시간: 5분
    - PR #1은 **초록이지만 머지하지 않았다.** main 병합은 사용자 승인이 필요하다(AGENTS.md)
    - 머지할지 브랜치를 유지할지 먼저 확인할 것
-3. **CHECK 제약 마이그레이션 (#028 잔여)** — 예상 시간: 30분
-   - `wiki_seeds.status`의 CHECK는 **새로 생성한 DB에만** 적용된다. `CREATE TABLE IF NOT EXISTS`는
-     기존 테이블에 CHECK를 소급하지 않는다. 기존 DB는 `store.ts`의 가드만으로 보호된다
-   - `db.exec('PRAGMA table_info(wiki_seeds)')`로 실제 DB에 CHECK가 있는지 확인할 것
-4. **`claimPendingSeed` 동시성** — 예상 시간: 30분
+3. **`claimPendingSeed` 동시성 (#039)** — 예상 시간: 30분
    - 트랜잭션 래퍼도 UNIQUE 제약도 없고 문장 원자성에만 의존한다(#039)
    - `research-tick.js:60`이 별도 프로세스로 루프를 띄우므로 겹침이 가능하다
    - peek-claim으로 리팩터하면 **이중 claim이 실증 가능하다** — 리뷰어가 changes 1/1을 재현했다
@@ -50,7 +47,7 @@ IF NOT EXISTS`가 기존 DB에 CHECK를 소급하지 않으므로, 이미 생성
 
 ## baseline 상태
 <!-- npm run verify 결과 -->
-- passed: 393 / failed: 0 / suites: 35 / test files discovered: 15
+- passed: 394 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
 - 제품 커밋: 1032352 (freshness 면제를 PR merge로 한정 + advisory 가시성 + engines 범위)

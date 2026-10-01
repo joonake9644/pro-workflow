@@ -451,8 +451,9 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
   };
 }
 
-// Enforced here because the CHECK constraint in schema.sql only reaches databases
-// created after it was added — `CREATE TABLE IF NOT EXISTS` does not retrofit one.
+// This guard rejects before the statement reaches SQLite, so the caller gets one clear
+// message instead of a trigger abort. The database enforces the same vocabulary with
+// triggers in schema.sql, which also reach databases created before they existed.
 const SEED_STATUSES = ['pending', 'active', 'done', 'failed'] as const;
 
 const STOPWORDS = new Set([

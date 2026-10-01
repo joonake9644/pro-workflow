@@ -600,13 +600,52 @@ describe('createStore', () => {
       assert.equal(row.status, 'pending', 'the row must be left untouched when the write is refused');
     });
 
-    it('the schema refuses a bogus status even when the guard is bypassed', () => {
+    it('the database refuses a bogus status even when the application guard is bypassed', () => {
       const s = seedRow('q2');
       assert.throws(
         () => store.db.prepare(`UPDATE wiki_seeds SET status = 'BOGUS' WHERE id = ?`).run(s.id),
-        /CHECK|constraint/i,
-        'a CHECK constraint is the last line of defense against an unreachable row',
+        /must be one of pending, active, done, failed/,
+        'a trigger is the last line of defense against a row no read path can reach',
       );
+      assert.throws(
+        () => store.db.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'q', 0, 'BOGUS')`).run(),
+        /must be one of/,
+        'INSERT must be guarded too, not only UPDATE',
+      );
+    });
+
+    it('upgrades a legacy database that was created before the status triggers existed', () => {
+      // This is the point of #028's remainder: a CHECK could never reach an existing
+      // table, but `CREATE TRIGGER IF NOT EXISTS` is a separate statement and does.
+      const legacy = initializeDatabase(':memory:');
+      legacy.exec('DROP TRIGGER wiki_seeds_status_valid_insert');
+      legacy.exec('DROP TRIGGER wiki_seeds_status_valid_update');
+      legacy.exec('DROP TABLE wiki_seeds');
+      legacy.exec(`CREATE TABLE wiki_seeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wiki_slug TEXT NOT NULL REFERENCES wikis(slug) ON DELETE CASCADE,
+        query TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        parent_id INTEGER REFERENCES wiki_seeds(id) ON DELETE SET NULL,
+        depth INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`);
+      legacy.prepare(`INSERT INTO wikis (slug, title, flavor, root_path) VALUES ('w', 'W', 'research', '/w')`).run();
+      // Pre-condition: the legacy table accepts a bogus status.
+      legacy.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'old', 0, 'BOGUS')`).run();
+      assert.equal(
+        one<{ c: number }>(legacy, `SELECT count(*) AS c FROM wiki_seeds WHERE status = 'BOGUS'`).c, 1,
+        'precondition: the legacy table is unconstrained',
+      );
+
+      // Re-running the schema (what initializeDatabase does on open) must install the guard.
+      legacy.exec(fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8'));
+      assert.throws(
+        () => legacy.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'new', 0, 'BOGUS')`).run(),
+        /must be one of/,
+        'the re-run schema must guard a table it did not create',
+      );
+      legacy.close();
     });
 
     it('setSeedStatus still accepts all four known states', () => {

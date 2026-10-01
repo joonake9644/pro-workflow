@@ -31,7 +31,8 @@
   읽지도 고치지도 못하는 행**이라는 게 실제 피해였다
 - **CHECK 제약으로 기존 DB를 보호했다고 보고하면 안 된다.** `CREATE TABLE IF NOT EXISTS`는 기존
   테이블에 CHECK를 소급하지 않는다. 애플리케이션 가드와 CHECK는 서로 다른 층이고, CHECK는 신규
-  DB에만 간다. 코드 주석과 TICKETS 양쪽에 남겼다
+  DB에만 간다. **이후 트리거로 교체했다** — `CREATE TRIGGER IF NOT EXISTS`는 별도 문장이라
+  기존 테이블에 적용된다. 자세한 것은 아래 "기존 DB 제약" 절
 
 ## 리뷰에서 배운 것
 
@@ -86,6 +87,23 @@
 - **선언과 실제 지원 범위가 다르면 CI가 먼저 안다.** `engines: >=18`과
   `better-sqlite3(20+)`의 모순은 오래 미검증 blocker로 남아 있었고, CI를 처음 돌리자
   65초 만에 드러났다. 미검증 blocker는 실측 한 번으로 종료된다
+
+## 기존 DB 제약 — CHECK가 아니라 트리거를 쓴다
+
+기존 테이블에 제약을 추가할 때 `CREATE TABLE IF NOT EXISTS`는 **아무것도 하지 않는다.** 그래서
+schema.sql에 CHECK를 추가해도 이미 있는 DB에는 영원히 적용되지 않는다. 두 가지 선택이 있었다:
+
+- **테이블 재생성**: 새 테이블 + 데이터 복사 + DROP + RENAME. 자기참조 FK(`parent_id`)와
+  인덱스 재생성이 필요하고 `PRAGMA foreign_keys=OFF`를 트랜잭션 밖에서 다뤄야 한다
+- **트리거**: `CREATE TRIGGER IF NOT EXISTS`는 별도 문장이므로 기존 테이블에 그대로 적용된다.
+  additive이고 idempotent하다
+
+**트리거를 택했다.** 그리고 CHECK는 **제거했다** — BEFORE 트리거가 CHECK보다 먼저 발화하는 것을
+실측으로 확인했기 때문이다. 둘 다 두면 CHECK의 에러는 영원히 안 나오고, 아무것도 막지 않는
+방어가 코드에 남는다(M6 교훈). 하나의 메커니즘, 하나의 메시지.
+
+`store.ts`의 `SEED_STATUSES` 가드와 DB 트리거는 **역할이 다르다**: 가드는 SQLite에 도달하기 전에
+친절한 메시지로 막고, 트리거는 가드를 우회한 직접 SQL까지 막는 마지막 선이다. 둘 다 필요하다.
 
 ## 주의사항 (다시 읽을 것)
 

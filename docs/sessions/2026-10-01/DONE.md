@@ -58,6 +58,15 @@ TAP 형식 fixture를 RED로 고정하고 GREEN. `num()`이 `m` 플래그를 버
 - **#035 종료**: node 18 레그의 `npm ci`가 `EBADENGINE`으로 canceled(65초). 사용자 승인 후
   `engines`를 `>=20`으로, 매트릭스를 `[20,22,24]`로 변경 — 선언과 실제 지원 범위 일치
 
+### #028 잔여 — status 제약을 기존 DB까지 (트리거)
+- CHECK는 `CREATE TABLE IF NOT EXISTS`로 기존 테이블에 소급되지 않는다. 프로덕션 DB 확인:
+  CHECK 없음, `user_version` 0, 마이그레이션 기구 없음
+- 테이블 재생성과 트리거를 비교하고 **트리거를 택했다** — additive·idempotent이고 데이터 복사와
+  FK 재구성 위험이 없다. INSERT·UPDATE 두 트리거
+- 둘을 함께 두면 BEFORE 트리거가 항상 먼저 발화해 CHECK 에러가 영원히 안 나오므로 CHECK 제거
+- 프로덕션 DB 사본 실측: 트리거 0→2, 데이터·자기참조 parent_id 보존, `foreign_key_check` 빈 결과
+- 뮤턴 5/5 (BEFORE→AFTER는 동치로 확인 후 제외)
+
 ## 기각한 리뷰 발견 (근거 기록)
 
 **`infix NEAR`가 FTS5 문법 에러라는 minor — 기각.** 리뷰어는 실행 없이 FTS5 BNF로 추론했다.
@@ -82,6 +91,6 @@ TAP 형식 fixture를 RED로 고정하고 GREEN. `num()`이 `m` 플래그를 버
 ## 미검증 (이 세션에서 끝내지 못한 것)
 - **GitHub Actions 실제 실행** — push 전이라 run 0건. 이번에 고친 게이트가 CI에서 도는지 미확인(#007)
 - **node 18 레그** — 미설치. `better-sqlite3` engines가 20+를 요구해 `npm ci` 실패 가능성 높음(#035)
-- **CHECK 제약이 이미 생성된 DB에 적용되지 않음** — 마이그레이션 미작성
+- ~~CHECK 제약이 기존 DB에 미적용~~ → **#028 잔여 완료**: CHECK 대신 트리거로 기존 DB까지 적용
 - **`claimPendingSeed` 동시성** — 트랜잭션 래퍼도 UNIQUE 제약도 없고 문장 원자성에만 의존(#039)
 - `trainer.ts`·`optimizer/store.ts`는 커버리지 0 유지 — `Math.random()` 때문에 비결정적(#036)

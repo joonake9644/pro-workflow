@@ -14,10 +14,9 @@
 
 ### Storage 후속
 
-- [ ] **CHECK 제약 마이그레이션(#028 잔여)** — `wiki_seeds.status`의 CHECK는 새로 만든 DB에만
-  적용된다. `CREATE TABLE IF NOT EXISTS`가 기존 테이블에 CHECK를 소급하지 않는다. 기존 DB는
-  애플리케이션 가드로만 보호된다. `db.exec('PRAGMA table_info(wiki_seeds)')`로 실제 확인 후
-  테이블 재생성 마이그레이션 작성
+- [✓] **CHECK 제약 마이그레이션(#028 잔여) — 종료 2026-10-01.** CHECK 대신 트리거로 해결.
+  `CREATE TRIGGER IF NOT EXISTS`는 별도 문장이라 기존 테이블에 적용된다. 테이블 재생성은
+  데이터 복사·FK 재구성 위험이 있어 택하지 않았다. 프로덕션 DB 사본으로 마이그레이션 실측
 - [ ] **#039 `claimPendingSeed` 동시성** — 트랜잭션 래퍼도 UNIQUE/부분 인덱스도 없고 문장
   원자성에만 의존한다. 6개 동시 프로세스 실측에서 단 1개 승자였다(리뷰어가 재현). 그러나
   `research-tick.js:60`이 별도 프로세스로 루프를 띄우므로 겹침이 가능하다. **peek-claim으로

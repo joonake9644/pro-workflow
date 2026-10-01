@@ -150,3 +150,56 @@ node -e 구동              →  정상
   이후 모든 프로브는 stub 경로이며 네트워크 0건
 - `trainer.ts`·`optimizer/store.ts`는 커버리지 0 유지 — `trainer.ts:338`의 `Math.random()` 때문에
   비결정적이라 특정 패치 궤적을 고정하는 테스트는 flaky가 된다(#036)
+---
+
+## #028 잔여 — 기존 DB 마이그레이션 (트리거)
+
+### 왜 CHECK가 아니라 트리거인가
+
+앞서 `schema.sql`에 CHECK를 넣었지만 `CREATE TABLE IF NOT EXISTS`는 **기존 테이블에 소급하지
+않는다.** 프로덕션 DB를 읽어 확인했다: `sqlite_master.sql`에 CHECK 없음, `user_version` 0,
+마이그레이션 기구 자체가 없음.
+
+두 방식을 실측 비교했다:
+
+| 방식 | 기존 DB 도달 | 위험 |
+|---|---|---|
+| 테이블 재생성(CHECK) | 가능 | 데이터 복사·자기참조 FK·인덱스 재생성·`foreign_keys=OFF` 필요 |
+| **`CREATE TRIGGER IF NOT EXISTS`** | **가능(별도 문장이라 기존 테이블에 적용)** | 없음. additive, idempotent |
+
+트리거가 훨씬 안전하고 동일한 보장을 준다. **게다가 둘을 함께 두면 BEFORE 트리거가 항상 먼저
+발화해 CHECK 에러가 영원히 안 나온다** — 실측 확인. 아무것도 막지 않는 방어가 되므로 CHECK를
+제거하고 트리거 단일 메커니즘으로 통일했다(M6 교훈).
+
+INSERT·UPDATE 두 트리거가 필요하다. 큐가 `status`를 UPDATE로 바꾸기 때문이다.
+
+### 프로덕션 DB 사본으로 마이그레이션 실측
+
+```
+BEFORE triggers: 0        BEFORE user_version: 0
+AFTER  triggers: wiki_seeds_status_valid_insert, wiki_seeds_status_valid_update
+AFTER  rows: 1:pending:null 2:active:1 3:done:1 4:failed:1   (데이터·자기참조 보존)
+FK 무결성: []             UPDATE BOGUS => 거부(정상)
+```
+
+`initializeDatabase`가 열 때마다 `schema.sql`을 재실행하므로 기존 DB는 다음 오픈에 자동
+업그레이드된다. 레거시 DB(트리거 없음 + BOGUS 행 존재)를 만들어 재실행 후 가드가 설치되는지
+테스트로 고정했다.
+
+### 뮤턴 5/5
+
+| 변조 | 결과 |
+|---|---|
+| UPDATE 트리거 제거 | killed |
+| INSERT 트리거 제거 | killed |
+| 상태 목록에서 failed 제거 | killed |
+| WHEN 조건을 항상-false로 | killed |
+| RAISE(ABORT) → RAISE(IGNORE) | killed |
+
+`BEFORE UPDATE` → `AFTER UPDATE`는 **동치 변조**로 판명돼 제외했다. AFTER 트리거의
+`RAISE(ABORT)`도 문장을 롤백해 행이 `pending`으로 남는 것을 직접 실행해 확인했다
+(둘 다 `threw: true`, `row status after: pending`).
+
+### 최종
+
+4모드(로컬/PR/main/CI=true) **394 tests / 394 pass / 0 fail**, suites 35, tsc exit 0, build exit 0.

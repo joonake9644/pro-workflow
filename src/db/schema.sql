@@ -113,16 +113,32 @@ CREATE TABLE IF NOT EXISTS wiki_seeds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   wiki_slug TEXT NOT NULL REFERENCES wikis(slug) ON DELETE CASCADE,
   query TEXT NOT NULL,
-  -- Applies to freshly created databases only: `CREATE TABLE IF NOT EXISTS` is a no-op
-  -- on an existing table, so a database created before this constraint keeps an
-  -- unconstrained `status` column. Those databases are protected by the SEED_STATUSES
-  -- guard in src/db/store.ts, which validates on the way in.
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'active', 'done', 'failed')),
+  status TEXT NOT NULL DEFAULT 'pending',
   parent_id INTEGER REFERENCES wiki_seeds(id) ON DELETE SET NULL,
   depth INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- The status vocabulary is enforced by triggers rather than a CHECK constraint.
+-- A CHECK can only be declared inside CREATE TABLE, and `CREATE TABLE IF NOT EXISTS`
+-- does not retrofit one onto an existing table — so a CHECK would protect new databases
+-- and silently leave old ones unconstrained, which is the whole problem (#028).
+-- `CREATE TRIGGER IF NOT EXISTS` is a separate statement and DOES apply to existing
+-- tables, so re-running this schema upgrades old databases in place. Both INSERT and
+-- UPDATE are needed: the queue claims a seed by updating its status.
+CREATE TRIGGER IF NOT EXISTS wiki_seeds_status_valid_insert
+BEFORE INSERT ON wiki_seeds
+FOR EACH ROW WHEN NEW.status IS NULL OR NEW.status NOT IN ('pending', 'active', 'done', 'failed')
+BEGIN
+  SELECT RAISE(ABORT, 'wiki_seeds.status must be one of pending, active, done, failed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS wiki_seeds_status_valid_update
+BEFORE UPDATE ON wiki_seeds
+FOR EACH ROW WHEN NEW.status IS NULL OR NEW.status NOT IN ('pending', 'active', 'done', 'failed')
+BEGIN
+  SELECT RAISE(ABORT, 'wiki_seeds.status must be one of pending, active, done, failed');
+END;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS wiki_pages_fts USING fts5(
   title,
