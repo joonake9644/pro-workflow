@@ -9,13 +9,13 @@
 2. `npm test` → `scripts/run-tests.js`
 3. `npm run validate:context` → `scripts/validate-context.js`
 
-같은 명령이 `.github/workflows/ci.yml`에서 node 매트릭스 `[18, 20, 22]`로 다시 돈다.
+같은 명령이 `.github/workflows/ci.yml`에서 node 매트릭스 `[20, 22, 24]`로 다시 돈다.
 
 ## `scripts/run-tests.js` — 테스트 탐색
 
 - 루트: `src/`, `scripts/`. `fs.existsSync`로 걸러낸다
 - 재귀: `fs.readdirSync(withFileTypes)` 수동 walk. 깊이 제한이 없다. node 자체 glob이
-  v22.6.0+ 기능이라 `engines: >=18`과 충돌하므로 의도적으로 피한다
+  v22.6.0+ 기능이라 구버전 node와 충돌하므로 의도적으로 피한다
 - 테스트 파일 판정: **어디서든** `*.test.*`·`*.spec.*`(ts/js/mts/cts/mjs/cjs). **`__tests__/`
   안에서는** 실행 가능 확장자 파일 전부. `schema.sql`·`README.md`·`snapshot.json`은 제외 —
   tsx가 확장자를 모르면 suite 전체가 죽는다
@@ -49,7 +49,7 @@ handoff(`docs/next-session-prompt.md`)를 검사하되, **구조만 보지 않�
 - 재측정: `npm test`를 실제로 돌려 exit code를 요구한다
 - 파싱: spec 리포터(`ℹ pass N`)와 tap 리포터(`# pass N`) **둘 다** 받아야 한다. node는
   비TTY stdout에서 23 미만이면 tap이 기본이고, 이 게이트는 파이프로 출력을 읽는다.
-  spec만 보면 CI 매트릭스 3레그 전부에서 실패한다 — VERIFIED(node 20.11.0·22.17.0 실측)
+  spec만 보면 CI 매트릭스 전 레그에서 실패한다 — VERIFIED(node 20.11.0·22.17.0 실측)
 - `num()`은 `g`를 **덮어쓰지 않고** 기존 플래그에 합친다. `m`을 버리면 앵커된 패턴이 전부 null이 된다
 - 정합성 검사: `passed + failed + (skipped + todo + cancelled) == tests`. skipped를 빼먹으면
   `it.skip()` 하나만 있어도 게이트가 깨진다

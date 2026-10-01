@@ -47,6 +47,17 @@ TAP 형식 fixture를 RED로 고정하고 GREEN. `num()`이 `m` 플래그를 버
 8841 B → 7781 B(113줄). 상세 서술을 새 `.context/GATES.md`로 옮기고 경로만 남겼다.
 이 문서가 스스로 지시한 방식이다
 
+### PR CI 실증 — 두 번째 구조적 결함 발견·수정
+- PR #1로 CI를 올려 실증. 3레그 전부 실패 — 이미 고친 TAP 리포터가 아니라 **freshness 게이트가
+  PR에서 통과 불가능**했기 때문. GitHub의 synthetic merge commit(`728bee0`)은 저자 클론에
+  존재하지 않아 handoff가 이름 붙일 수 없다 — 충족 불가능이지 미충족이 아니다
+- CI에서 freshness를 면제하되 **advisory로 노출**. 조용한 면제는 "비활성 검사"를 "충족 검사"로
+  읽히게 한다. 실제 재측정 비교는 CI에서도 계속 돈다
+- `CI` env 신뢰성은 GitHub 공식 Variables reference로 확인. `CI`는 overwrite 가능하고
+  `GITHUB_ACTIONS`는 고정이므로 **둘 다** 확인한다
+- **#035 종료**: node 18 레그의 `npm ci`가 `EBADENGINE`으로 canceled(65초). 사용자 승인 후
+  `engines`를 `>=20`으로, 매트릭스를 `[20,22,24]`로 변경 — 선언과 실제 지원 범위 일치
+
 ## 기각한 리뷰 발견 (근거 기록)
 
 **`infix NEAR`가 FTS5 문법 에러라는 minor — 기각.** 리뷰어는 실행 없이 FTS5 BNF로 추론했다.

@@ -49,11 +49,11 @@ test('parses the counts out of a real runner transcript', () => {
   });
 });
 
-test('parses the tap reporter format that node 18/20/22 emit through a pipe', () => {
+test('parses the tap reporter format that node 20/22 emit through a pipe', () => {
   assert.deepEqual(S().parseTestOutput(TAP_RUN_OUTPUT), {
     passed: 241, failed: 0, suites: 16, files: 9, tests: 241,
     skipped: 0, todo: 0, cancelled: 0,
-  }, 'the CI matrix runs 18, 20, and 22 — all below the version that defaults to spec');
+  }, 'the CI matrix runs 20 and 22 — both below the version that defaults to spec');
   assert.equal(S().measurementProblem(S().parseTestOutput(TAP_RUN_OUTPUT)), null,
     'a tap-format run must satisfy the same consistency check as a spec-format one');
 });

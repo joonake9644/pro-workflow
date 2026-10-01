@@ -4,13 +4,13 @@
 
 ### 최우선 — 이번에 고친 게이트가 CI에서 도는지 확인해야 한다
 
-- [ ] **#007 CI 실행 실증** — `git push fork chore/plan-harness-v2` 후 실제 Actions 로그에서
-  node 18/20/22 3레그 통과 확인. **이번 세션에서 고친 `session-close` 게이트가 여기에 걸린다.**
-  리포터 형식 문제는 로컬에서 node 20.11.0·22.17.0으로 실측해 수정했지만, 게이트를 그 버전에서
-  end-to-end로 돌리지는 않았다. fork의 push 트리거 설정과 Actions 활성화 상태도 재확인 필요
-- [ ] **#035 node 18 검증** — `engines: >=18`인데 `better-sqlite3@12.8.0`은 `20.x||22.x||...`를
-  요구한다. CI 매트릭스 `[18, 20, 22]`에서 18 레그는 `npm ci` 단계에서 실패할 가능성이 높다.
-  **실측하지 않았다.** 성공하려면 engines를 올리거나 매트릭스에서 18을 빼야 한다
+- [ ] **#007 CI 실행 실증 (진행 중)** — PR #1 생성, 첫 실행은 freshness 게이트의 PR 구조 문제로
+  실패. CI 면제로 수정한 뒤 **재실행 결과 미확인**. 다음 세션에서 `gh run list`로 확인할 것.
+  로컬 `CI=true`/`GITHUB_ACTIONS=true` 재현으로는 통과를 확인했으나, 실제 Actions의 env와
+  checkout ref 차이는 **미검증**
+- [✓] **#035 node 18 검증 — 종료 2026-10-01.** run 36831658193의 build(18)이 `npm ci`에서
+  `EBADENGINE`(better-sqlite3@12.8.0 required `20.x||...`, current `v18.20.8`)로 65초 후 canceled.
+  사용자 승인 후 `engines`를 `>=20`, 매트릭스를 `[20, 22, 24]`로 변경. 선언과 실제를 일치시켰다
 
 ### Storage 후속
 

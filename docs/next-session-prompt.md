@@ -3,8 +3,10 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 # 다음 세션 작업 지시서 — 2026-10-01 이후
 
 ## 🎯 다음 세션 목표
-`#007 CI 실행 실증`을 끝낸다. 이번 세션에서 `session:close` 게이트가 **CI 3레그 전부에서
-실패하는 결함**을 찾아 고쳤으므로, 실제 GitHub Actions 로그로 그 수정이 맞았는지 확인해야 한다.
+PR #1의 CI를 초록으로 만든다. 이번 세션에 PR을 올려 CI를 실증했더니 `session:close` 게이트가
+**PR에서 구조적으로 통과 불가능**했다 — GitHub이 만드는 synthetic merge commit(`728bee0`)을
+handoff가 이름 붙일 방법이 없다. CI에서 freshness를 면제(advisory로 노출)하는 것으로 고쳤고,
+**아직 CI 재실행 결과가 미확인**이다.
 
 ## ⚡ 즉시 시작 명령
 ```
@@ -18,11 +20,13 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
    - `git fetch fork && git rev-list --left-right --count fork/main...HEAD`
    - `npm run verify` (exit 0이어야 시작). baseline이 아래와 다르면 드리프트한 것이다
    - node를 바꿨다면 `npm rebuild better-sqlite3` (ABI 불일치 방지, 15분 소요)
-2. **#007 CI 실증** — 예상 시간: 15분
+2. **#007 CI 실증 (PR #1)** — 예상 시간: 15분
    - `git push fork chore/plan-harness-v2` 후 `gh run list --repo joonake9644/pro-workflow` 확인
-   - **3레그(node 18/20/22) 전부 초록이어야 한다.** 이번에 고친 게이트가 여기에 걸린다
-   - node 18 레그는 `better-sqlite3@12.8.0`의 `engines`가 `20.x||22.x||23.x||24.x||25.x`라
-     `npm ci` 단계에서 실패할 가능성이 높다. **실측해서 확인**하고 결과에 따라 기록(#035)
+   - **매트릭스는 `[20, 22, 24]`.** node 18은 제거했다 — `better-sqlite3@12.8.0`이 20+만
+     지원하는데 프로젝트 `engines`가 `>=18`이라 모순이었다. `engines`를 `>=20`으로 올리고
+     18을 뺐다(사용자 승인). run 36831658193에서 18 레그는 `npm ci`가 65초 후 canceled였다
+   - 남은 미확인은 **PR에서 게이트가 실제로 통과하는지**다. 로컬 `CI=true` 재현으로는 통과를
+     확인했지만, GitHub Actions의 실제 `CI` env와 그 밖의 차이(권한, checkout ref)는 미검증
 3. **CHECK 제약 마이그레이션** — 예상 시간: 20분
    - `wiki_seeds.status`의 CHECK는 **새로 생성한 DB에만** 적용된다. `CREATE TABLE IF NOT EXISTS`는
      기존 테이블에 CHECK를 소급하지 않는다. 기존 DB는 `store.ts`의 가드만으로 보호된다
@@ -45,7 +49,7 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 
 ## baseline 상태
 <!-- npm run verify 결과 -->
-- passed: 388 / failed: 0 / suites: 35 / test files discovered: 15
+- passed: 391 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
 - 제품 커밋: dc5df6c (세션 종료 문서 + AGENTS.md 8KB 압축 + .context/GATES.md 신설)

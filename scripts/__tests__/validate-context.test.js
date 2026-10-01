@@ -721,6 +721,22 @@ test('the real repository satisfies the session-close gate', () => {
 
 const { execFileSync } = require('node:child_process');
 
+// The freshness rule is exempt under CI, so any test that asserts freshness must clear
+// the variable first — otherwise running the suite in CI (which is exactly what happens)
+// turns its own expectations inside out. Local runs and CI runs then agree.
+function withoutCI(fn) {
+  const prevCI = process.env.CI;
+  const prevGH = process.env.GITHUB_ACTIONS;
+  delete process.env.CI;
+  delete process.env.GITHUB_ACTIONS;
+  try {
+    return fn();
+  } finally {
+    if (prevCI !== undefined) process.env.CI = prevCI;
+    if (prevGH !== undefined) process.env.GITHUB_ACTIONS = prevGH;
+  }
+}
+
 function gitRepo({ datedSession, ...files } = {}) {
   const root = makeProject({ extraFiles: files, datedSession });
   execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
@@ -733,14 +749,16 @@ function gitRepo({ datedSession, ...files } = {}) {
 
 
 test('a handoff in a git repo that does not name the current commit is reported', () => {
-  const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
-  const { failures } = check(root);
-  assert.ok(msgs(failures).some(m => m.includes('predates product work')),
-    `expected a staleness report, got ${JSON.stringify(failures.map(f => f.msg))}`);
-  fs.rmSync(root, { recursive: true, force: true });
+  withoutCI(() => {
+    const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
+    const { failures } = check(root);
+    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+      `expected a staleness report, got ${JSON.stringify(failures.map(f => f.msg))}`);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
 
-test('a handoff that names the current commit passes', () => {
+test('a handoff that names the current commit passes', () => withoutCI(() => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
     .toString().trim();
@@ -750,17 +768,17 @@ test('a handoff that names the current commit passes', () => {
   assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
       `named commit ${head} must satisfy the freshness rule`);
   fs.rmSync(root, { recursive: true, force: true });
-});
+}));
 
-test('a handoff that names a stale commit is reported', () => {
+test('a handoff that names a stale commit is reported', () => withoutCI(() => {
   const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
   const { failures } = check(root);
   assert.ok(msgs(failures).some(m => m.includes('predates product work')));
   fs.rmSync(root, { recursive: true, force: true });
-});
+}));
 
-test('a handoff naming a longer sha still matches the short head', () => {
+test('a handoff naming a longer sha still matches the short head', () => withoutCI(() => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const full = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root }).toString().trim();
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${full}\n`));
@@ -768,13 +786,72 @@ test('a handoff naming a longer sha still matches the short head', () => {
   assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
     'a full sha must satisfy a short-head comparison');
   fs.rmSync(root, { recursive: true, force: true });
-});
+}));
 
 test('a non-git tree with a valid handoff is not failed for freshness', () => {
   const root = makeProject();
   const { failures } = check(root);
   assert.ok(!msgs(failures).some(m => m.includes('predates product work')));
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a CI run is not failed for freshness, because the merge commit cannot be in the handoff', () => {
+  // GitHub builds a synthetic merge commit for the PR. `git log -1 -- . :!docs :!.context`
+  // returns that sha in CI, and it is by definition newer than anything the branch author
+  // could have written into the handoff. VERIFIED on run 36831658193: the gate asked for
+  // 728bee0, which does not exist in the author's clone at all.
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
+    .toString().trim();
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
+
+  const prev = process.env.CI;
+  process.env.CI = 'true';
+  try {
+    const { failures, advisories } = check(root);
+    assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
+      'CI must judge the branch as written, not against a commit it just synthesised');
+    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified in CI')),
+      'the exemption must be visible, not a silent pass — an unseen skip reads as a satisfied check');
+  } finally {
+    if (prev === undefined) delete process.env.CI; else process.env.CI = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a GITHUB_ACTIONS-only run is exempt too, since GitHub documents CI as overwritable', () => {
+  const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
+    .toString().trim();
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK(`\ncommit: ${head}\n`));
+
+  const prevCI = process.env.CI;
+  const prevGH = process.env.GITHUB_ACTIONS;
+  delete process.env.CI;
+  process.env.GITHUB_ACTIONS = 'true';
+  try {
+    const { failures } = check(root);
+    assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
+      'GITHUB_ACTIONS alone must be enough to detect the synthetic merge commit');
+  } finally {
+    if (prevCI !== undefined) process.env.CI = prevCI;
+    if (prevGH === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = prevGH;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CI still enforces every other rule, so the exemption is only about freshness', () => {
+  const root = gitRepo({ datedSession: false, 'docs/next-session-prompt.md': HANDOFF_OK() });
+  const prev = process.env.CI;
+  process.env.CI = 'true';
+  try {
+    const { failures } = check(root);
+    assert.ok(msgs(failures).some(m => m.includes('dated snapshot')),
+      'exempting freshness must not exempt the structural rules');
+  } finally {
+    if (prev === undefined) delete process.env.CI; else process.env.CI = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // --- trend-aligned thin-handoff rules (somatlas ADR-0015 / docstudio / Red Hat 2026-07) ---
@@ -877,11 +954,13 @@ test('AGENTS.md over the absolute size limit is still a failure', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('the real entry doc is inside both the line and byte budgets', () => {
+test('the real entry doc is inside both the line and byte budgets', () => withoutCI(() => {
+  // withoutCI because the freshness rule pushes its own advisory under CI; this test is
+  // about the entry-doc budgets and must not start failing when an unrelated one appears.
   const { failures, advisories } = check(path.join(__dirname, '..', '..'));
   assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
   assert.deepEqual(advisories, [], JSON.stringify(advisories, null, 2));
-});
+}));
 
 // --- the pathspec exclusion is the rule's core behaviour and was untested ---
 
@@ -914,7 +993,7 @@ test('a docs-only commit after product work does not invalidate the handoff', ()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a handoff naming the commit before product work is reported', () => {
+test('a handoff naming the commit before product work is reported', () => withoutCI(() => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const before = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root }).toString().trim();
 
@@ -926,7 +1005,7 @@ test('a handoff naming the commit before product work is reported', () => {
     'a handoff naming the pre-product commit must be reported stale');
   assert.ok(failures.some(f => f.expected.includes(before) || f.expected.includes('newest product change')));
   fs.rmSync(root, { recursive: true, force: true });
-});
+}));
 
 test('a .context-only change does not stale the handoff either', () => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });

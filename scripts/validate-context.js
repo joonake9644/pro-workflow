@@ -226,16 +226,37 @@ function check(rootArg) {
   // only touch docs/ or .context/ are excluded, otherwise a commit whose only
   // purpose is updating the handoff would make the handoff stale by construction
   // and the rule could never be satisfied.
+  //
+  // Skipped under CI. GitHub builds a synthetic merge commit per PR, so `productHead`
+  // there names a sha that did not exist when the branch was written and cannot be in
+  // the handoff by any means — the rule is unsatisfiable, not merely unmet. VERIFIED
+  // on run 36831658193, which asked for 728bee0 while the branch head was 0d8fb87.
+  // The gate's purpose is that a session was closed on the branch; on a PR the code is
+  // what needs judging, and every other rule below still applies.
+  //
+  // Both signals are checked because GitHub documents `CI` as overwritable and only
+  // `GITHUB_ACTIONS` as fixed ("Always set to true", Variables reference, 2026-10).
   if (fs.existsSync(prompt) && fs.existsSync(path.join(root, '.git'))) {
-    const product = productHead(root);
-    const body = fs.readFileSync(prompt, 'utf8');
-    if (!product) {
-      fail('a readable git history', 'unavailable', 'docs/next-session-prompt.md',
-        'cannot verify that the session handoff reflects the current work');
-    } else if (!hasHeadRef(body, product) && !hasHeadRef(body, gitHead(root) || '')) {
-      fail(`commit ${product} (newest product change) or newer`, 'absent',
-        'docs/next-session-prompt.md',
-        'the session handoff predates product work; re-run the session-end harness');
+    if (isCI()) {
+      // Report the skip rather than passing silently. An exemption nobody can see is
+      // how a disabled check starts reading as a satisfied one.
+      advisories.push({
+        file: 'docs/next-session-prompt.md',
+        expected: 'a commit the handoff can name',
+        actual: 'not checked (CI sets a synthetic merge commit)',
+        msg: 'handoff freshness is not verified in CI; run `npm run session:close` on the branch',
+      });
+    } else {
+      const product = productHead(root);
+      const body = fs.readFileSync(prompt, 'utf8');
+      if (!product) {
+        fail('a readable git history', 'unavailable', 'docs/next-session-prompt.md',
+          'cannot verify that the session handoff reflects the current work');
+      } else if (!hasHeadRef(body, product) && !hasHeadRef(body, gitHead(root) || '')) {
+        fail(`commit ${product} (newest product change) or newer`, 'absent',
+          'docs/next-session-prompt.md',
+          'the session handoff predates product work; re-run the session-end harness');
+      }
     }
   }
 
@@ -439,6 +460,11 @@ function productHead(root) {
   } catch {
     return null;
   }
+}
+
+// GitHub Actions sets both; the docs mark only GITHUB_ACTIONS as non-overwritable.
+function isCI() {
+  return Boolean(process.env.CI || process.env.GITHUB_ACTIONS);
 }
 
 function hasHeadRef(text, head) {

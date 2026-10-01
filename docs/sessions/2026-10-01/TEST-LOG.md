@@ -12,10 +12,10 @@ handoff가 지시하는 #025·#031·#005를 재수행하지 않았다.
 
 | | baseline | 중간 | 최종 |
 |---|---|---|---|
-| tests | 293 | 373 | **388** |
+| tests | 293 | 373 | **391** |
 | suites | 22 | 34 | 35 |
 | test files | 11 | — | 15 |
-| pass | 289 | 369 | **388** |
+| pass | 289 | 369 | **391** |
 | fail | **4** | 4 | **0** |
 | tsc | exit 0 | exit 0 | exit 0 |
 | build | exit 0 | exit 0 | exit 0 |
@@ -34,22 +34,52 @@ handoff가 지시하는 #025·#031·#005를 재수행하지 않았다.
 
 ```
 run-tests: discovered 15 test file(s)
-ℹ tests 388
+ℹ tests 391
 ℹ suites 35
-ℹ pass 388
+ℹ pass 391
 ℹ fail 0
 ```
+
+로컬 · `CI=true` · `GITHUB_ACTIONS=true` 세 모드 모두 **391 pass / 0 fail**.
 
 - `npx tsc --noEmit` → exit 0 (출력 없음)
 - `npm run build` → exit 0
 - `npm run validate:context` → OK. 2건의 선언된 홈경로 예외(`docs/next-session-prompt.md:11`,
   `docs/sessions/2026-09-28/next-session-prompt.md:13`)
-- `npm run session:close` → **OK**
+- `npm run session:close` → **OK** (로컬·CI=true 양쪽)
   ```
   session:close: OK (pro-workflow-lab)
-    live run: passed 388 / failed 0 / suites 35 / test files 15
+    live run: passed 391 / failed 0 / suites 35 / test files 15
     docs/next-session-prompt.md records those counts
   ```
+
+## PR CI 실증에서 나온 두 번째 결함
+
+PR #1을 올려 CI를 실증했다. **3레그 전부 실패**했는데, 이미 고친 TAP 리포터 문제가 아니라
+**freshness 게이트가 PR에서 구조적으로 통과 불가능**했기 때문이다.
+
+```
+CI 로그:  expected: 'commit 728bee0 (newest product change) or newer', actual: 'absent'
+```
+
+`728bee0`은 GitHub이 PR마다 만드는 **synthetic merge commit**이고, 저자의 클론에는
+존재하지 않는다(`git cat-file -t 728bee0` → `Not a valid object name`). 브랜치를 작성할 때
+존재하지 않았던 sha를 handoff가 이름 붙일 방법이 없으므로 **충족 불가능**이지 미충족이 아니다.
+
+수정: CI에서 freshness를 면제하고, **면제 사실을 advisory로 노출**한다. 조용히 넘어가면
+"비활성화된 검사"가 "충족된 검사"로 읽히기 때문이다. `npm run session:close`가 실제 재측정
+비교를 계속 하므로 게이트의 핵심은 CI에서도 살아 있다.
+
+`CI` env 신뢰성은 공식 문서로 확인: Variables reference는 `CI`를 "Always set to `true`"이면서
+동시에 "overwrite할 수 있다"고 적고, `GITHUB_ACTIONS`를 "Always set to `true`"로 적는다.
+그래서 **둘 다** 확인한다.
+
+### node 18 제거 (#035 종료)
+
+run 36831658193의 build(18)은 `npm ci`가 65초 후 canceled였다. `EBADENGINE`:
+`better-sqlite3@12.8.0` required `20.x||22.x||23.x||24.x||25.x`, current `v18.20.8`.
+프로젝트 `engines`는 `>=18`이라 모순이었다. 사용자 승인 후 `engines`를 `>=20`으로 올리고
+매트릭스를 `[20, 22, 24]`로 바꿨다. **선언과 실제 지원 범위를 일치시켰다.**
 
 ## 리포터 형식 — 버전별 실측 (이번 세션의 핵심 발견)
 
