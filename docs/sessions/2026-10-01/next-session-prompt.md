@@ -48,7 +48,8 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 - passed: 388 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
-- 제품 커밋: 885fe65 (optimizer LLM/store TDD + storage 결함 5건 + gate TAP 수정)
+- 제품 커밋: dc5df6c (세션 종료 문서 + AGENTS.md 8KB 압축 + .context/GATES.md 신설)
+- 직전 제품 커밋: 885fe65 (optimizer LLM/store TDD + storage 결함 5건 + gate TAP 수정)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
 ## ⚠️ 주의사항
