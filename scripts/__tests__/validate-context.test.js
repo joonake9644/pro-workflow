@@ -954,13 +954,15 @@ test('AGENTS.md over the absolute size limit is still a failure', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('the real entry doc is inside both the line and byte budgets', () => withoutCI(() => {
-  // withoutCI because the freshness rule pushes its own advisory under CI; this test is
-  // about the entry-doc budgets and must not start failing when an unrelated one appears.
+test('the real entry doc is inside both the line and byte budgets', () => {
+  // Scoped to AGENTS.md on purpose. Under CI the freshness rule contributes its own
+  // advisory (and, without CI, its own failure), both legitimate and neither about the
+  // entry-doc budget. Asserting "no advisory at all" couples this test to CI mode.
   const { failures, advisories } = check(path.join(__dirname, '..', '..'));
-  assert.deepEqual(failures, [], JSON.stringify(failures, null, 2));
-  assert.deepEqual(advisories, [], JSON.stringify(advisories, null, 2));
-}));
+  const aboutEntryDoc = x => x.file === 'AGENTS.md';
+  assert.deepEqual(failures.filter(aboutEntryDoc), [], JSON.stringify(failures, null, 2));
+  assert.deepEqual((advisories || []).filter(aboutEntryDoc), [], JSON.stringify(advisories, null, 2));
+});
 
 // --- the pathspec exclusion is the rule's core behaviour and was untested ---
 
