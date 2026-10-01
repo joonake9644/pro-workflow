@@ -1,4 +1,4 @@
-# REVIEW — 최신 세션 (docs/sessions/ 에서 최신 날짜 참조)
+# REVIEW — 2026-10-01 (종료 게이트)
 
 TOOL_LABEL: opencode (space-bunny-free)
 REVIEW_MODEL: opencode-go/deepseek-v4.1-flash

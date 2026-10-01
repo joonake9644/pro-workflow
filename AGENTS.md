@@ -33,6 +33,7 @@
 이 파일은 매 세션 통째로 읽히므로 **150줄 이하**를 유지한다(하드). 8KB는 advisory, 절대 한계는
 12KB다. 세 값 모두 `npm run validate:context`가 검사한다. 세부는 경로로만 가리킨다.
 2026-07 Red Hat 가이드는 예산을 바이트가 아니라 **줄**로 제시한다("150줄 미만").
+**이 파일이 8KB를 넘으면 상세는 `.context/`로 옮기고 경로만 남긴다** — 더티 상태로 두지 않는다.
 
 1. `.context/STATE`의 `checkpoint`와 `blockers`만 읽는다 (한 줄 JSON).
 2. 그다음 `.context/TODO.md`에서 `todo_active`의 stage를 확인한다.
@@ -50,18 +51,7 @@
 
 1. **독립 코드 리뷰 실행.** 메인 컨텍스트의 자기 판단으로 판정하지 않는다. 새
    프로세스·새 컨텍스트에서 메인이 작성한 내용을 보지 않은 상태로 리뷰시킨다.
-
-   ```bash
-   opencode run --model "opencode-go/deepseek-v4.1-flash" \
-     --dir "$PWD" "<리뷰 대상 커밋/범위와 리뷰 요구사항>"
-   ```
-
-   리뷰 프롬프트에는 반드시 다음을 포함한다.
-   - 리뷰 대상을 명시 (`git show <sha>` / diff 범위)
-   - "작성자를 신뢰하지 말고, 동기 부여 설명도 검증 대상"이라는 지시
-   - `VERIFIED` / `INFERENCE` 라벨링 강제
-   - 수정 금지(리뷰만), 발견은 `[SEVERITY] file:line` + VERIFIED/IMPACT/FIX 형식
-   - 심각도 등급이 비어 있는 등급은 **명시적으로** 보고할 것
+   상세(모델·프롬프트 필수 항목·출력 형식)는 `.context/GATES.md`의 리뷰 절을 따른다.
 
 2. **리뷰 실측 확인.** 리뷰어가 실제로 명령을 실행해 결과를 냔는지 확인한다.
    권한 거부·도구 실패로 **중간에 끊긴 리뷰는 완료된 리뷰가 아니다.** 미완료라면
@@ -111,16 +101,8 @@
 | 이력 문서가 현재본을 덮지 않음 | `docs/DONE.md` 금지. DONE은 날짜 폴더 전용 (20개 프로젝트 중 15개가 루트에 없음) |
 | 이 문서가 규칙의 유일한 원본 | `validate-context`의 CLAUDE.md import·중복 검사 |
 
-`scripts/validate-context.js`가 검사하는 것: AGENTS.md 150줄 하드·12KB 절대·8KB advisory·200B 하한,
-`CLAUDE.md`의 `@AGENTS.md` import와 규칙 비중복, `.context/STATE` 7필드 타입, `todo_active`이
-TODO.md에 존재, 심볼릭 링크가 저장소를 벗어나지 않음, 가짜 증거 차단, ADR 상태 라인,
-CONTEXT/TODO/glossary 존재·비어있지 않음, 커밋되는 문서 전체의 절대 홈경로 없음. 위반 시 고칠 파일·
-예상값·실제값을 출력하고 exit 1. AI 호출과 네트워크를 쓰지 않는다.
-
-pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 설정되어 있지 않고
-`scripts/commit-validate.js`도 opt-in(`scripts/setup-hook.js`) 구조라, Git 훅 경로는
-기존 방식을 따르려 하지 않고 CI만 게이트로 썼다. 로컬 커밋 전 게이트가 필요하면
-`npm run verify`를 직접 돌린다.
+각 게이트가 **무엇을 검사하는지**의 상세는 `.context/GATES.md`에 있다. 표는 "무엇을 막는가"만
+담는다 — 상세는 경로로만 가리켜 8KB advisory를 넘기지 않는다.
 
 ---
 
