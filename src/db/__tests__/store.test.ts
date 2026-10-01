@@ -614,6 +614,47 @@ describe('createStore', () => {
       );
     });
 
+    it('names the same status vocabulary whether the app layer or the trigger rejects', () => {
+      // The prefixes differ on purpose (which layer rejected is useful), but both must
+      // carry the shared vocabulary so one pattern can recognise either rejection.
+      const shared = /one of pending, active, done, failed/;
+      const appMsg = (() => {
+        try { store.setSeedStatus(seedRow('qv').id, 'BOGUS' as never); return ''; }
+        catch (e) { return (e as Error).message; }
+      })();
+      const triggerMsg = (() => {
+        const s = seedRow('qw');
+        try { store.db.prepare(`UPDATE wiki_seeds SET status = 'BOGUS' WHERE id = ?`).run(s.id); return ''; }
+        catch (e) { return (e as Error).message; }
+      })();
+      assert.match(appMsg, shared, 'the application guard must carry the vocabulary');
+      assert.match(triggerMsg, shared, 'the trigger must carry the same vocabulary');
+    });
+
+    it('guards every write path, including REPLACE and UPSERT', () => {
+      // The two BEFORE triggers have to cover the conflict-resolution forms too, or a
+      // future switch of enqueueSeed to an UPSERT would reopen the hole silently.
+      const s = seedRow('qp');
+      assert.throws(
+        () => store.db.prepare(
+          `INSERT OR REPLACE INTO wiki_seeds (id, wiki_slug, query, depth, status) VALUES (?, 'w', 'x', 0, 'BOGUS')`,
+        ).run(s.id),
+        /must be one of/,
+        'INSERT OR REPLACE is a delete-then-insert, so the insert trigger must fire',
+      );
+      assert.throws(
+        () => store.db.prepare(
+          `INSERT INTO wiki_seeds (id, wiki_slug, query, depth, status) VALUES (?, 'w', 'y', 0, 'pending')
+           ON CONFLICT(id) DO UPDATE SET status = 'BOGUS'`,
+        ).run(s.id),
+        /must be one of/,
+        'the DO UPDATE branch of an UPSERT must hit the update trigger',
+      );
+      // The rejected writes must not have landed.
+      const row = one<{ status: string }>(store.db, 'SELECT status FROM wiki_seeds WHERE id = ?', s.id);
+      assert.equal(row.status, 'pending');
+    });
+
     it('upgrades a legacy database that was created before the status triggers existed', () => {
       // This is the point of #028's remainder: a CHECK could never reach an existing
       // table, but `CREATE TRIGGER IF NOT EXISTS` is a separate statement and does.

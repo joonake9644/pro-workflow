@@ -852,6 +852,36 @@ test('a push to main is still checked, because its commit is real and nameable',
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// A repo whose HEAD is a real two-parent merge commit — the shape GitHub's default merge
+// strategy produces on main as well as on a PR, so it must not by itself imply "PR".
+function mergeCommitRepo(extraFiles = {}) {
+  const root = gitRepo(extraFiles);
+  const base = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root })
+    .toString().trim();
+  execFileSync('git', ['checkout', '-q', '-b', 'topic'], { cwd: root, stdio: 'ignore' });
+  writeIn(root, 'src/feature.ts', 'export const y = 2;\n');
+  execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-q', '-m', 'topic'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['checkout', '-q', base], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['merge', '--no-ff', '--no-edit', '-q', 'topic'], { cwd: root, stdio: 'ignore' });
+  return root;
+}
+
+test('a merge commit on a main push is still checked, not treated as a PR', () => {
+  // GitHub's default merge strategy leaves a two-parent HEAD on main. Exempting on parent
+  // count alone would silently stop verifying freshness on exactly that path.
+  const root = mergeCommitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
+
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
+    const { failures, advisories } = check(root);
+    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+      'a stale handoff on a main merge must be reported — the parent fallback must not fire when a branch ref is present');
+    assert.ok(!(advisories || []).some(a => a.msg.includes('freshness is not verified')));
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('a synthetic merge is detected by parent count when GITHUB_REF is absent', () => {
   // Fallback for a CI that checks out a merge commit without naming the ref.
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });

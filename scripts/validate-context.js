@@ -472,14 +472,18 @@ function isCI() {
 
 // The freshness rule is only unsatisfiable when HEAD is the synthetic merge commit
 // GitHub builds for a pull request. GitHub names that case precisely with GITHUB_REF
-// (`refs/pull/N/merge`); a push to main keeps `refs/heads/...` and stays checkable, so
-// keying off `CI` alone would silently stop verifying main.
+// (`refs/pull/N/merge`), so that is the primary signal. A push to main keeps
+// `refs/heads/...` and stays checkable — and it may well BE a merge commit (GitHub's
+// default merge strategy), so the parent-count probe must not run when a branch ref is
+// present, or it would silently stop verifying main.
 function isSyntheticMergeCheckout(root) {
   const ref = process.env.GITHUB_REF || '';
   if (ref.startsWith('refs/pull/')) return true;
+  // An explicit non-pull ref is trustworthy: this is not the PR merge checkout.
+  if (ref) return false;
+  // Fallback for a CI that checks out a merge commit without naming the ref. Only reached
+  // when GITHUB_REF is unset, so a `refs/heads/main` merge commit is never exempted.
   if (!isCI()) return false;
-  // Fallback for a CI that checks out a merge commit without GITHUB_REF: a merge has
-  // more than one parent. `rev-list --parents` prints `<commit> <parent>...`.
   try {
     const line = require('child_process')
       .execFileSync('git', ['rev-list', '--parents', '-n', '1', 'HEAD'],

@@ -203,3 +203,55 @@ FK 무결성: []             UPDATE BOGUS => 거부(정상)
 ### 최종
 
 4모드(로컬/PR/main/CI=true) **394 tests / 394 pass / 0 fail**, suites 35, tsc exit 0, build exit 0.
+
+---
+
+## 세션 종료 리뷰(3차)와 수정 후 최종
+
+### 3차 리뷰 발견과 처리
+
+| 등급 | 발견 | 처리 |
+|---|---|---|
+| major | `isSyntheticMergeCheckout`의 부모 수 fallback이 main push의 merge commit까지 면제 | **수정.** `GITHUB_REF`가 있으면 fallback 금지. 재현 fixture로 검증 |
+| minor | 트리거 write-path(REPLACE·UPSERT) 테스트 없음 | **수정.** 세 경로 실측 후 테스트 고정 |
+| minor | 두 계층 메시지 어구 불일치 | **수정(판정 기록).** 실측 결과 공유 어구가 이미 존재. 테스트로 고정 |
+
+### major 재현 (수정 전)
+
+```
+refs/heads/main(merge)   => freshness 면제   ← 의도와 정반대
+refs/pull/1/merge        => freshness 면제
+GITHUB_REF 없음(merge)   => freshness 면제
+```
+
+### 수정 후
+
+```
+refs/heads/main(merge)   => freshness 검사함
+refs/pull/1/merge        => freshness 면제
+GITHUB_REF 없음(merge)   => freshness 면제
+GITHUB_REF 없음(로컬)    => freshness 검사함
+```
+
+RED 테스트(2-부모 merge repo + `refs/heads/main` → stale handoff 보고)를 추가했고,
+수정을 되돌리면 그 테스트가 RED가 됨을 확인했다.
+
+### 트리거 write-path 실측
+
+```
+INSERT OR REPLACE BOGUS => 거부
+REPLACE INTO BOGUS      => 거부
+UPSERT DO UPDATE BOGUS  => 거부
+INSERT OR REPLACE valid => 수용
+```
+
+### 최종 (4모드)
+
+```
+local:   tests 397 / pass 397 / fail 0
+PR:      pass 397 / fail 0
+main:    pass 397 / fail 0
+CI=true: pass 397 / fail 0
+```
+
+tsc exit 0, build exit 0, suites 35.

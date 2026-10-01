@@ -1,4 +1,4 @@
-# REVIEW — 최신 세션 (docs/sessions/ 에서 최신 날짜 참조)
+# REVIEW — 2026-10-01 (종료 게이트)
 
 TOOL_LABEL: opencode (space-bunny-free)
 REVIEW_MODEL: opencode-go/deepseek-v4.1-flash
@@ -108,3 +108,44 @@ REVIEW_RESULT: minor 4건 발견 → **3건 수정, 1건 수용**. blocker 0, ma
 `withoutCI` 헬퍼가 `GITHUB_REF`를 지우지 않아, **PR 모드에서 스위트를 돌리면 3건이 실패**했다
 (면제가 여전히 활성). 로컬·CI=true에서는 통과하므로 놓치기 쉬웠다. 4모드를 모두 돌려 발견했고
 헬퍼가 3개 신호를 모두 저장·복원하도록 고쳤다.
+
+---
+
+## 3차 리뷰 (세션 종료, 전체 범위) — 2026-10-01
+
+REVIEW_MODEL: opencode-go/deepseek-v4.1-flash
+REVIEW_SCOPE: `c00718d..HEAD` (세션 전체). #028 트리거 마이그레이션이 미리뷰 상태였음
+REVIEW_RESULT: blocker 0, major 1(수정), minor 2(수정), nit 0
+
+### [major] `isSyntheticMergeCheckout`의 부모 수 fallback이 너무 넓음 — **수정**
+
+리뷰어 지적: `GITHUB_REF`가 pull이 아니어도 `isCI()`이고 HEAD가 2-부모면 면제한다. main push가
+merge commit을 가질 수 있으므로(GitHub 기본 merge 전략), main에서 freshness가 조용히 꺼진다.
+커밋과 코드 주석은 "main은 검사한다"고 반대로 적혀 있었다.
+
+**메인이 직접 재현했다.** 2-부모 merge HEAD + `GITHUB_REF=refs/heads/main`에서 freshness가
+면제되는 것을 확인 — 의도와 정반대. 수정: `GITHUB_REF`가 설정돼 있고 pull이 아니면 **부모 수
+fallback을 쓰지 않는다.** fallback은 `GITHUB_REF`가 없을 때만이다.
+
+수정 검증: 같은 재현 fixture에서 `refs/heads/main`은 **검사함**, `refs/pull/`은 면제,
+`GITHUB_REF` 없음+CI+merge는 면제, 로컬은 검사함. RED 테스트(2-부모 merge repo + main ref →
+stale handoff 보고)를 추가하고, 수정을 되돌리면 그 테스트가 RED가 되는 것까지 확인했다.
+
+### [minor] 트리거 write-path 테스트 공백 — **수정**
+
+핵심 주장("두 BEFORE 트리거가 모든 write path를 닫는다")이 SQLite 시맨틱 추론에만 의존하고
+테스트가 없었다. `INSERT OR REPLACE`·`REPLACE INTO`·`ON CONFLICT DO UPDATE` 세 경로를 실측해
+모두 거부됨을 확인하고 테스트로 고정했다.
+
+### [minor] 두 계층의 에러 메시지 어구 불일치 — **수정(판정 근거 기록)**
+
+트리거는 `must be one of ...`, 앱 가드는 `is not one of ...`. 리뷰어는 어느 계층이 거부했는지
+식별 불가라고 봤다. **실측 결과 두 메시지 모두 `one of pending, active, done, failed`를
+포함한다** — 공유 패턴으로 양쪽 모두 인식 가능하고, 접두사가 달라 어느 계층인지는 오히려
+구분된다. 리뷰어 지적이 실제보다 강했다. 공유 어구가 유지되도록 테스트로 고정했다.
+
+### 리뷰어가 검증하지 못한 것 (샌드박스 거부)
+
+리뷰어는 `GITHUB_ACTIONS=... npm test`, `CI=true npm test`, `node -e`, `sqlite3`을 거부당했다.
+따라서 UPSERT 트리거 동작과 CI 모드 숫자는 INFERENCE였다. **메인이 4모드 전부와 UPSERT 경로를
+직접 실측**해 대체 검증했다(397 tests / 0 fail, 세 경로 모두 거부).
