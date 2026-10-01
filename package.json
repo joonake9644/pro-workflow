@@ -13,7 +13,7 @@
     "check": "tsc --noEmit",
     "validate:context": "node scripts/validate-context.js",
     "verify": "npm run check && npm test && npm run validate:context",
-    "session:close": "npm run validate:context"
+    "session:close": "node scripts/session-close.js"
   },
   "keywords": [
     "claude-code",
@@ -71,5 +71,10 @@
     "settings.example.json",
     "mcp-config.example.json",
     "README.md"
-  ]
+  ],
+  "allowScripts": {
+    "better-sqlite3@12.8.0": true,
+    "esbuild@0.28.0": true,
+    "fsevents@2.3.3": true
+  }
 }

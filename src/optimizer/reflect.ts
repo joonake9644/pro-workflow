@@ -67,11 +67,12 @@ function formatRejection(r: Rejection): Record<string, unknown> {
   };
 }
 
-function parsePatches(text: string): Patch[] {
+export function parsePatches(text: string): Patch[] {
   const root = stripFencesAndParse<{ patches?: unknown }>(text);
   if (!root || !Array.isArray(root.patches)) return [];
   const out: Patch[] = [];
   for (const raw of root.patches) {
+    if (raw === null || typeof raw !== 'object') continue;
     const p = raw as Record<string, unknown>;
     if (typeof p.op !== 'string' || typeof p.anchor !== 'string' || typeof p.payload !== 'string') continue;
     if (p.op !== 'add' && p.op !== 'delete' && p.op !== 'replace') continue;
@@ -80,9 +81,7 @@ function parsePatches(text: string): Patch[] {
   return out;
 }
 
-function extractReasoning(text: string): string {
-  const root = stripFencesAndParse<{ reasoning?: string }>(text);
-  return root?.reasoning ?? '';
+export function extractReasoning(text: string): string {
+  const root = stripFencesAndParse<{ reasoning?: unknown }>(text);
+  return typeof root?.reasoning === 'string' ? root.reasoning : '';
 }
-
-export const __test = { parsePatches, extractReasoning };

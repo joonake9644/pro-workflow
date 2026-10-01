@@ -54,7 +54,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
     ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }
     : { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' };
 
-  const price = PRICE_PER_M_TOKENS[req.model];
+  const price = priceFor(req.model);
   if (!price) {
     const known = Object.keys(PRICE_PER_M_TOKENS).join(', ');
     throw new Error(
@@ -72,16 +72,17 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
   return { text, inputTokens: usage.input, outputTokens: usage.output, costUsd };
 }
 
-function buildAnthropicBody(req: LLMRequest): string {
+export function buildAnthropicBody(req: LLMRequest): string {
   return JSON.stringify({
     model: req.model,
     max_tokens: req.maxTokens ?? 4096,
+    temperature: req.temperature ?? 0.2,
     system: req.system,
     messages: [{ role: 'user', content: req.user }],
   });
 }
 
-function buildOpenAIBody(req: LLMRequest): string {
+export function buildOpenAIBody(req: LLMRequest): string {
   return JSON.stringify({
     model: req.model,
     max_tokens: req.maxTokens ?? 4096,
@@ -93,7 +94,7 @@ function buildOpenAIBody(req: LLMRequest): string {
   });
 }
 
-function extractText(provider: Provider, body: unknown): string {
+export function extractText(provider: Provider, body: unknown): string {
   const obj = body as Record<string, unknown>;
   if (provider === 'anthropic') {
     const content = obj.content as Array<{ type: string; text?: string }> | undefined;
@@ -103,7 +104,7 @@ function extractText(provider: Provider, body: unknown): string {
   return choices?.[0]?.message?.content ?? '';
 }
 
-function extractUsage(provider: Provider, body: unknown): { input: number; output: number } {
+export function extractUsage(provider: Provider, body: unknown): { input: number; output: number } {
   const obj = body as Record<string, unknown>;
   if (provider === 'anthropic') {
     const u = obj.usage as { input_tokens?: number; output_tokens?: number } | undefined;
@@ -113,8 +114,17 @@ function extractUsage(provider: Provider, body: unknown): { input: number; outpu
   return { input: u?.prompt_tokens ?? 0, output: u?.completion_tokens ?? 0 };
 }
 
-function postJson(host: string, path: string, headers: Record<string, string>, body: string): Promise<string> {
-  const timeoutMs = parseInt(process.env.SKILL_OPTIMIZER_TIMEOUT_MS ?? '', 10) || DEFAULT_TIMEOUT_MS;
+export function resolveTimeoutMs(raw: string | undefined): number {
+  const parsed = parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
+export function priceFor(model: string): { input: number; output: number } | null {
+  return PRICE_PER_M_TOKENS[model] ?? null;
+}
+
+export function postJson(host: string, path: string, headers: Record<string, string>, body: string): Promise<string> {
+  const timeoutMs = resolveTimeoutMs(process.env.SKILL_OPTIMIZER_TIMEOUT_MS);
   return new Promise((resolve, reject) => {
     let timer: NodeJS.Timeout | null = null;
     let settled = false;

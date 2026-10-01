@@ -129,6 +129,7 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
 
   const updateLearningStmt = db.prepare(`
     UPDATE learnings SET
+      project = COALESCE(@project, project),
       category = COALESCE(@category, category),
       rule = COALESCE(@rule, rule),
       mistake = COALESCE(@mistake, mistake),
@@ -157,11 +158,14 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     SELECT * FROM sessions WHERE id = ?
   `);
 
+  // COALESCE guards two ways: a null delta no longer writes NULL, and a column that
+  // was already nulled by an older build recovers instead of staying NULL forever
+  // (SQLite: NULL + 0 = NULL).
   const updateSessionCountsStmt = db.prepare(`
     UPDATE sessions SET
-      edit_count = edit_count + @edits,
-      corrections_count = corrections_count + @corrections,
-      prompts_count = prompts_count + @prompts
+      edit_count = COALESCE(edit_count, 0) + COALESCE(@edits, 0),
+      corrections_count = COALESCE(corrections_count, 0) + COALESCE(@corrections, 0),
+      prompts_count = COALESCE(prompts_count, 0) + COALESCE(@prompts, 0)
     WHERE id = @id
   `);
 
@@ -281,7 +285,7 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     },
 
     getAllLearnings(project) {
-      if (project) {
+      if (project !== undefined) {
         return getLearningsByProjectStmt.all(project) as Learning[];
       }
       return getAllLearningsStmt.all() as Learning[];
@@ -290,6 +294,7 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     updateLearning(id, updates) {
       const result = updateLearningStmt.run({
         id,
+        project: updates.project ?? null,
         category: updates.category ?? null,
         rule: updates.rule ?? null,
         mistake: updates.mistake ?? null,
@@ -308,6 +313,12 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     },
 
     startSession(id, project) {
+      // `id TEXT PRIMARY KEY` is not implicitly NOT NULL in SQLite, and NULLs may repeat
+      // in a UNIQUE index — so an unguarded insert would write a row that no lookup,
+      // no getRecentSessions entry, and no cleanup path can ever address.
+      if (typeof id !== 'string' || id === '') {
+        throw new Error(`startSession requires a non-empty session id, got ${JSON.stringify(id)}`);
+      }
       startSessionStmt.run({ id, project: project ?? null });
       return getSessionStmt.get(id) as Session;
     },
@@ -358,8 +369,14 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     },
 
     listWikis(scope) {
-      if (scope) return listWikisByScopeStmt.all(scope) as Wiki[];
-      return listWikisStmt.all() as Wiki[];
+      if (scope === undefined) return listWikisStmt.all() as Wiki[];
+      if (typeof scope !== 'string') {
+        throw new Error(
+          `listWikis: scope must be 'global' or 'project', got ${JSON.stringify(scope)}; ` +
+          `a bare --scope flag arrives as boolean true and would otherwise surface as a raw SQLite bind error`,
+        );
+      }
+      return listWikisByScopeStmt.all(scope) as Wiki[];
     },
 
     deleteWiki(slug) {
@@ -398,10 +415,17 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     },
 
     enqueueSeed(seed) {
+      const status = seed.status ?? 'pending';
+      if (!SEED_STATUSES.includes(status)) {
+        throw new Error(
+          `enqueueSeed: "${status}" is not one of ${SEED_STATUSES.join(', ')}; ` +
+          `a row in an unknown state is skipped by the queue, missed by the report buckets, and unreachable by cancel`,
+        );
+      }
       return enqueueSeedStmt.get({
         wiki_slug: seed.wiki_slug,
         query: seed.query,
-        status: seed.status ?? 'pending',
+        status,
         parent_id: seed.parent_id ?? null,
         depth: seed.depth,
       }) as WikiSeed;
@@ -416,10 +440,20 @@ export function createStore(dbPath: string = getDefaultDbPath()): Store {
     },
 
     setSeedStatus(id, status) {
+      if (!SEED_STATUSES.includes(status)) {
+        throw new Error(
+          `setSeedStatus: "${status}" is not one of ${SEED_STATUSES.join(', ')}; ` +
+          `a row in an unknown state is skipped by the queue, missed by the report buckets, and unreachable by cancel`,
+        );
+      }
       setSeedStatusStmt.run(status, id);
     },
   };
 }
+
+// Enforced here because the CHECK constraint in schema.sql only reaches databases
+// created after it was added — `CREATE TABLE IF NOT EXISTS` does not retrofit one.
+const SEED_STATUSES = ['pending', 'active', 'done', 'failed'] as const;
 
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'with',

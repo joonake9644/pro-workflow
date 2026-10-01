@@ -39,6 +39,9 @@ jobs:
       - name: Validate session context
         run: npm run validate:context
 
+      - name: Session close gate
+        run: npm run session:close
+
       - name: Verify dist files exist
         run: |
           test -f dist/index.js

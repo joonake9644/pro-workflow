@@ -52,11 +52,12 @@ Rules:
 - score is your continuous confidence: 1.0 = perfect, 0.0 = clearly violates.
 - Be strict: borderline cases score below 0.6 and pass=false.`;
 
-function parseOutcomes(text: string): ValidationOutcome[] {
+export function parseOutcomes(text: string): ValidationOutcome[] {
   const root = stripFencesAndParse<{ outcomes?: unknown }>(text);
   if (!root || !Array.isArray(root.outcomes)) return [];
   const out: ValidationOutcome[] = [];
   for (const raw of root.outcomes) {
+    if (raw === null || typeof raw !== 'object') continue;
     const o = raw as Record<string, unknown>;
     if (typeof o.item_id !== 'number' || typeof o.pass !== 'boolean') continue;
     out.push({
@@ -68,5 +69,3 @@ function parseOutcomes(text: string): ValidationOutcome[] {
   }
   return out;
 }
-
-export const __test = { parseOutcomes };

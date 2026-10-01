@@ -276,3 +276,239 @@ fixture에 회귀 테스트 15건 추가.
 - `docs/DONE.md` 검사를 날짜 폴더 블록 안에 넣어, 세션 폴더가 없으면 실행되지 않음 — 독립
   docs 루트 규칙이므로 블록 밖으로 이동.
 - 편집 실수 3건: 중복 `const` 선언, 함수를 문자열로 바꿈, `gitRepo`가 플래그를 `extraFiles`로 전달.
+
+---
+
+# 2026-09-28 세션 — #025 · #031 · #005
+
+기준선 실측: `git fetch fork` 후 `fork/main...HEAD` = 0/0. `npm run verify` exit 0,
+**239 pass / 0 fail, suites 16, test 파일 9** (node v24.19.0).
+
+### 시작하자마자 발견한 드리프트 — handoff의 baseline이 거짓말이었다
+`docs/next-session-prompt.md`는 `passed: 225`를 기록하고 있었고, 실제는 239였다.
+handoff가 이름 붙인 제품 커밋 `66aa5d5`의 커밋 메시지 자체가 "239 tests"라고 적고 있어서
+**handoff의 수치는 그 커밋 시점에도 이미 틀렸다.** sha 규칙은 그 커밋이 최신 제품 커밋이라
+통과했고, `session:close`는 `validate:context`의 별칭이라 숫자를 아예 보지 않았다.
+→ #031의 실제 구멍은 "오래된 문서"가 아니라 **"거짓 숫자를 쓴 문서가 통과한다"**였다.
+
+## #025 [Storage] `updateLearning`이 `project`를 버림 — 수정
+
+`src/db/store.ts:130`의 COALESCE 목록에 `project`가 없었고, 조용히 버린 채 `true`를 반환했다.
+
+수정 전에 호출부를 전수 확인했다: `updateLearning`의 프로덕션 호출자는 **0개**
+(`grep -rn` 결과 전부 테스트). project를 못 바꾸는 전제 depended-on 호출부가 없어
+의미를 바꾸는 것이 안전했다.
+
+RED: project 영속화 / null 유지 / 빈 문자열 저장 3건 추가 → **2 fail**(빈 문자열은 우연히 통과).
+GREEN: COALESCE에 `project` 추가 + `project: updates.project ?? null` 바인딩 → 59/59.
+
+뮤턴 2건 모두 검출: COALESCE에서 `project` 제거 → 2 fail, 파라미터 바인딩 제거 → 8 fail.
+
+## #031 [Infra] 종료 게이트가 수치를 재지 않는다 — 게이트 신설
+
+`scripts/session-close.js` 신설(142줄). `validate:context`의 구조 검사를 그대로 재사용하고,
+**그다음 실제로 테스트를 돌려** handoff의 baseline 블록과 필드별로 대조한다.
+
+- 구조 검사가 실패하면 측정조차 하지 않는다 — 나중의 성공한 측정이 결함을 덮을 수 없게.
+- 실행 로그에 없는 표시는 **0이 아니라 null**로 읽는다. 표식이 없는 실행을 "0건 실패"로 바꾸면
+  깨진 측정이 통과로 바뀐다.
+- baseline 블록이 **없어도 실패**다. 삭제로 우회할 수 없게.
+- `parseTestOutput` / `parseBaseline` / `compare` / `run`을 분리해 순수 함수를 단위 테스트한다.
+  실제 CLI 경로는 재귀가 생기므로(게이트가 자기를 구는 테스트를 실행함) 스텁 주입으로 끝낸다.
+
+배선: `package.json`의 `session:close` 배선, `ci.yml`에 스텝 추가, `ci.test.ts`의 GATES에 3번째 항목.
+GATES에 넣은 이유는 계측 3건(matrix job 소속 / 실패 은폐 / tsc 이후 순서)이 자동으로 따라오게 하기 위함이다.
+**기존 GATES 테이블이 CI에서 `session:close`를 실행하는 곳은 0개였다** — 전.projects 실측의 최대 공백이
+이 저장소에도 그대로 있었다.
+
+측정: stale handoff(기록 225 / 실제 239)에 대해 **exit 1**, `file/expected/actual`로 보고.
+
+## #005 [Search] fts.ts TDD — 테스트가 버그를 3개 찾았다
+
+`src/search/__tests__/fts.test.ts` 28 fixture. 서브에이전트(explore)가 API 맵을 냈지만
+그 "VERIFIED" 표시는 **내 실행으로 전부 재확인**했다. 그 표기가 맞지 않은 항목이 실제로 있었다.
+
+`:memory:` + `schema.sql`을 직접 exec. `initializeDatabase`를 부르면 dbPath와 무관하게
+`~/.pro-workflow`를 만들기 때문에(기존 #030) 피했다.
+
+### 발견·수정한 결함 3종
+1. **`getRelatedLearnings`가 SQLITE_ERROR** — `keywords.join(' OR ')`로 만든 질의가 `sanitizeQuery`를
+   거치며 `OR*`가 되어 FTS5 문법 오류. **키워드가 2개 이상인 learning이면 무조건 던진다.**
+   서브에이전트가 발견했고 미검증이라 했는데, 내 실행으로 재현 확인 후 RED로 고정했다.
+2. **인용 구문이 조용히 무너져 있었다** — `"zebra unique"`가 공백 기준 분할에 의해
+   `"zebra` + `unique"`로 찢어져 결국 **두 접두사 AND**가 됐다. 즉 phrase 검색은 애초에 동작한 적이 없다.
+   (FTS5 직접 질의 실측: `"zebra unique"` → 1행, `zebra* unique*` → 1,2행)
+3. **fallback이 자기 자신을 반환** — 키워드가 0개면 `searchByCategory` 결과를 걸러내지 않아
+   "related learning"에 질문한 learning 본인이 들어갔다. `+1` 오버페치도 빠져 있었다.
+
+추가로 고친 유효성 구멍: 맨 앞/뒤 `OR`(`'OR zebra'` → throws), 따옴표 짝이 안 맞을 때
+(`'"zebra'` → throws), 연산자만 있는 질의.
+
+### sanitizeQuery 설계 판단 (handoff가 결정을 넘겼던 지점)
+`sanitizeFtsQuery`(store.ts)처럼 전부 따옴표로 감싸면 **안전하지만 접두사 검색을 잃는다**
+(`zeb` → `zeb*`). 현재 호출자가 그에 의존하므로 토큰 필터 방식을 유지하고, 유효성을 깨뜨리는
+두 모양(연산자에 붙는 `*`, 문자 없는 토큰)만 제거했다. **보장은 문법 검증기가 아니라 테스트 스위트다.**
+
+## 변조로 통과한 건 통과가 아니다 — 이 세션에서 세 번 당했다
+
+| 실수 | 교훈 |
+|------|------|
+| perl 정규식이 안 맞아 뮤턴이 적용되지 않았는데 "통과"로 읽음 | 변이 적용 여부를 **기계적으로 확인**하고, 안 바뀌면 실패로 보고 |
+| 피스톤 없이 파일을 덮어써 "복원" | 백업 사본 필수 |
+| M6(인용 구문 분기) 생존 → 조사하니 **애초에 도달 불가능한 죽은 코드**였음 | 생존한 뮤턴은 조용히 지워야 할 죽은 코드일 수 있다 |
+
+뮤턴 10건 전부 **적용 확인 후 전부 검출**. 도중에 내가 추가한 방어 코드 2건(M9 따옴표 제거,
+M10 빈 결과 가드)이 **뮤턴으로 죽은 코드임이 판명**돼 삭제했다. 방어적으로 보이는 분기가
+아무것도 막지 않으면 방어처럼 읽히는 것이 가장 나쁘다.
+
+### 내가 만든 테스트 결함 4건
+- `s.project ?? 'proj'`가 **명시적 `null`을 `'proj'`으로 바꿔** NULL 케이스 5건이 엉뚱한 이유로 통과.
+- `const project`를 함수 바깥에 적어 `s is not defined`로 전 파일 크래시.
+- `got[0]` 접근으로 tsc 2건 실패.
+- phrase 테스트에 decoy 행이 없어 phrase와 두 접두사를 **구분하지 못했다** — 이게 M6 미검출의 원인.
+
+## 미검증 (이 세션에서 끝내지 못한 것)
+- **GitHub Actions 실제 실행** — fork의 push 트리거 비활성이라 run 0건. 이번에 CI에
+  `session:close` 스텝을 추가했지만 실제로 돌았는지는 push 후 확인이 필요(#007).
+- **Node 18** — 이 환경에 미설치. 게이트를 매트릭스 3레그에 넣었으므로, 버전별로
+  suite 수가 다르면 **코드와 무관하게 CI가 실패할 수 있다**(#035). 미검증.
+- **멀티 버전 실측 미수행** — node를 바꾸면 `npm rebuild better-sqlite3`(단일 ABI) 필요.
+- 이번 작업분은 **미커밋** 상태다. 종료 게이트의 "제품 커밋 기록"은 이전 세션 커밋을 가리킨다.
+
+---
+
+## 2026-10-01 세션 — #006 [Optimizer-LLM] TDD
+
+### 시작 상태 (복구 프로토콜)
+`dirty: true`라 git 상태를 먼저 실측했다. `c00718d`에 미커밋 제품 변경이 쌓여 있었고
+`docs/next-session-prompt.md`는 2026-09-28 세션 종료 시점의 것을 그대로 담고 있었다.
+`next-session-prompt.md`의 지시(#025·#031·#005)는 STATE의 `checkpoint`에 이미 완료로
+기록돼 있어 **문서가 STATE보다 뒤처진 상태**였다. 이때 지시를 그대로 따랐으면 이미 끝난
+ 일을 다시 한다. STATE가 정본이다.
+
+**ABI 함정 실측 재현**: `npm run verify`가 `ERR_DLOPEN_FAILED`(NODE_MODULE_VERSION 115 vs 137)로
+전 파일 크래시. node v24.19.0인데 바인딩이 예전 ABI로 빌드돼 있던 상태. `npm rebuild better-sqlite3`
+(재빌드 exit 0) 후 해소. 문서에 적힌 대로지만 이번에도 재현했다.
+
+### baseline (제품 변경 전 실측)
+- `npm test` → tests 293 / suites 22 / **pass 289 / fail 4**
+- `npx tsc --noEmit` → exit 0 · `npm run build` → exit 0
+- **fail 4건은 전부 `scripts/__tests__/validate-context.test.js`의 "real repository" 계열**이고
+  원인은 단 하나 — `docs/next-session-prompt.md`가 `c00718d`를 명시하지 않아 #031 신선도 게이트가
+  stale로 판정. 제품 코드 결함이 아니다. **exit 1이므로 baseline은 "빨강"이었다.** 이 상태에서
+  세션을 시작해야 증가분을 정직하게 읽을 수 있다.
+
+### 탈출구 3건 — 실측 확인 후 정식 export로 교체
+`rg -n "__test" src scripts` 결과 정의 3건 외 **호출자 0건**:
+`reflect.ts:88` `validate.ts:72` `store.ts:322`. `store.__test`는 이미 named export인
+`trajectoriesToValidation`의 중복 별칭이라 `__test.trajectoriesToValidation === trajectoriesToValidation`가
+`true`(서브에이전트 판정, 메인이 파일로 확인). 탈출구는 테스트 가능성을 **숨기는** 구조라
+테스트를 직접 export로 쓰게 하고 `__test` 3개를 전부 삭제했다.
+
+### 결함 4건 발견·수정 (모두 RED로 고정 후 수정)
+1. **`store.ts` `slice(-0)`** — `valCount`가 0이면 `slice(-0)`이 `slice(0)`이 되어 **validation에
+   전체 행이 들어가고 train이 비었다**. holdout 0 또는 배치 4개 미만에서 실측 재현.
+   `valCount > 0` 분기로 수정.
+2. **`llm.ts` anthropic temperature 유실** — `buildAnthropicBody`가 `temperature` 키를 아예
+   만들지 않았다. `validate.ts:28`은 채점 게이트에 `temperature: 0`을 명시하는데 이 프로바이더에서
+   조용히 버려졌다. 실제 요청 body를 캡처해 확인: `{"model":...,"max_tokens":4096,"system":"S","messages":[...]}`
+   — temperature 키 없음. openai는 `temperature: 0` 포함. 수정.
+3. **`llm.ts` 음수·0 타임아웃 통과** — `parseInt(...) || DEFAULT`에서 `'-1'`은 truthy라 `-1`이 그대로
+   통과했다. `setTimeout(fn, -1)`은 즉시 발화해 모든 요청이 0ms로 타임아웃. `resolveTimeoutMs`로 분리해
+   양수만 허용.
+4. **`reflect.ts` `extractReasoning` 타입 누출** — `root?.reasoning ?? ''`이 `{"reasoning":5}`에
+   `5`(숫자)를 반환. 반환 타입은 `string`이므로 잘못된 타입이 실행 기록으로 저장될 수 있었다.
+   `typeof` 가드 추가. `parsePatches`·`parseOutcomes`도 `null` 요소에서 `TypeError`를 던졌는데
+   함께 가드.
+
+### 뮤턴 25건 — 최종 25/25 검출
+1차 실행에서 3건 SURVIVED. **3건 모두 테스트 공백이나 제 뮤턴 스크립트 오류였고, 이를 감추지 않고
+원인을 나눠 处理했다.**
+- 2건은 **제 뮤턴 스크립트가 동치 변조를 만든 것**(`.trim()`을 치환했는데 `.trim()`이 그대로 남음;
+  `Math.max(0,...)` 하한 제거 — 이미 `valCount > 0` 가드가 가려서 관측 불가). 동치 변조는
+  살아남는 게 아니라 **애초에 변조가 아니다**. 스크립트를 고쳐 재실행.
+- 1건은 실제 공백 — `parsePatches('{"patches":[null]}')`가 `[]`을 반환하는데(가드가 있으므로) 그
+  경로에 테스트가 없었다. RED 2건 추가 후 재실행.
+- `Math.max(0, ...)`는 죽은 방어로 판명돼 **삭제했다**(M6 교훈). `Math.max(0,...)`가 없어도
+  음수 holdout 회귀 테스트가 잡아낸다.
+- 최종: **TOTAL=25 SURVIVED=0**. 스크립트는 `/var/folders/.../opencode/mutate.sh`(저장소 밖, 커밋 대상 아님).
+
+### 최종 실측
+- `npm test` → tests **373** / suites **34** / **pass 369 / fail 4** (신규 80 fixture)
+- `npx tsc --noEmit` → exit 0 · `npm run build` → exit 0
+- `npm run validate:context` → exit 1, 위반 1건 = 위와 동일한 handoff 신선도. **제품 코드와 무관.**
+- fail 4건은 세션 종료 하네스(`npm run session:close`)를 돌리면 해소된다. 지금 해결하려 들면
+  handoff에 아직 안 끝난 다음 작업 상태를 적어야 하므로 틀린다.
+
+### 남은 것
+- 이 작업분은 **미커밋**. 커밋 여부는 사용자 승인 대기(AGENTS.md git 정책).
+- #026~#030 Storage 결함 5건 여전히 특성화만 하고 미수정.
+- `store.ts`(I/O 322줄)와 `trainer.ts`는 커버리지 0 유지. `trainer.ts`는 `store?` 주입 지점과
+  `Math.random()`(trainer.ts:338) 때문에 비결정적 — 분기 검증만 가능.
+
+### 2026-10-01 세션 계속 — #026~#030 Storage 결함 5건 수정
+
+5건을 수정 전에 서브에이전트에게 **호출자 실측**을 맡겼다. 결함을 고치면 호출부가 깨질 수
+있으므로 "누가 이 함수를 호출하고, 그 인자가 빈 문자열이 될 수 있는가"를 먼저 확정해야 한다.
+그 결과 **5건 모두 프로덕션 호출자가 결함을 발동시킬 수 없음**이 실측으로 드러났다
+(`getAllLearnings`는 외부 호출자 0개 — 죽은 API. `listWikis` 3개 호출자 중 값을 넘기는
+`wiki-cli.js:78`의 `args.scope`는 파서를 실행해 `''`가 될 수 없음을 확인. `updateSessionCounts`
+2개 호출자 모두 정수 리터럴. `setSeedStatus`/`enqueueSeed` 모두 status가 리터럴이고
+`enqueueSeed`에 status를 넘기는 호출자는 0개. `startSession` 1개 호출자는
+`process.env.CLAUDE_SESSION_ID || String(process.ppid) || 'default'`라 `undefined`가 될 수 없음).
+그래서 수정은 **어떤 프로덕션 경로도 깨지 않는다**는 전제 위에서 진행할 수 있었다.
+
+#### TODO가 적힌 것보다 심각했던 것 2건
+
+**#029가 더 나빴다.** TODO는 "예외 없이 `id IS NULL` 행을 쓰고 undefined 반환"이라고 적었지만
+실측 결과 **두 번째 호출이 조용히 또 다른 NULL-id 행을 만든다.** `INSERT OR IGNORE`는 아무것도
+방지 못 하는데, 그 제약이 없다는 것이 근본 원인이다. `sessions.id`는 `id TEXT PRIMARY KEY`인데
+SQLite에서 `INTEGER PRIMARY KEY`를 뺀 PRIMARY KEY는 NOT NULL을 함의하지 않고, UNIQUE 인덱스에는
+NULL이 **반복될 수 있다**. 즉 PRIMARY KEY만으로는 이 구멍을 막을 수 없다. 실측:
+`startSession(undefined)` 두 번 → rowid 1, 2 둘 다 `id: null`. 게다가 `getSession(null)`도
+`undefined`를 반환하므로 **공개 API로는 이 행을 찾거나 치울 방법이 없다.** `getRecentSessions()`에
+들어가 `session-start.js:60-66`의 "이전 세션" 출력에도 섞인다. 수정: `typeof id !== 'string' ||
+id === ''`이면 삽입 전에 예외. 기존 테스트 `store.test.ts`의 "ignores a duplicate session id"가
+`INSERT OR IGNORE` 의미를 고정하고 있으므로 plain INSERT로 바꾸는 해법은 불가했다.
+
+**#028의 실제 피해는 오염이 아니라 "보이지 않음"이다.** 임의 status가 저장되면 그 행은 네 경로
+전부에서 회피된다 — `nextPendingSeed`, `claimPendingSeed`, `cmdCancel`
+(`status IN ('pending','active')`), 그리고 `cmdStatus`의 네 개 `SUM(CASE...)` 버킷 어느 것에도
+들지 않는다. 즉 **읽는 경로도 고치는 경로도 모두 놓친다.** 수정: `setSeedStatus`·`enqueueSeed`에
+애플리케이션 가드 + 스키마 `CHECK` 제약(마지막 방어선). 단 `CREATE TABLE IF NOT EXISTS`는
+기존 DB에 CHECK를 추가하지 않으므로, **이미 생성된 DB는 애플리케이션 가드만 유효**하다.
+프로덕션 DB를 읽기 전수 조사해 wiki_seeds 0행·sessions 0행이라 손상된 행이 없음을 확인했다.
+
+#### 발견한 추가 결함 1건 (저장하지 않음 — 수정이 함께 해결)
+`listWikis(true)`가 `TypeError: SQLite3 can only bind numbers, strings...`를 냈다.
+`wiki list --scope`(값 없이)를 실행하면 파서가 `true`를 넣는 걸 **파서를 실제로 실행해 확인**했다
+(`--scope` → `true`, `--scope ''` → `true`, `--scope=project` → `undefined` — `=` 형태는 미지원).
+도달 가능한 경로라 `typeof scope !== 'string'` 가드로 읽을 수 있는 에러로 바꾼다. 수정 전후
+모두 TypeError였으므로 회귀가 아니라 개선이다.
+
+#### #030의 계약 변경
+기존 테스트 2건이 버그의 부작용을 "계약"으로 굳고 있었다 — `throws a TypeError ... when the
+parent directory is absent`와 `never creates the parent directory of a custom path`. 그대로 두면
+`ensureDbDir`가 아무것도 안 하는 함수가 되어 결함을 되살리므로, **새 계약(호출자가 지정한
+디렉터리를 만든다)** 으로 교체했다. `ensureDbDir`에 `dir` 파라미터를 주고
+`path.dirname(path.resolve(dbPath))`를 넘긴다.
+
+#### 뮤턴 17건 — 최종 17/17 검출
+1차 3건 SURVIVED → 1건은 `enqueueSeed` 가드에 테스트가 없던 실제 공백(RED 3건 추가), 2건은
+**동치 변조**였다. `existsSync` 가드 제거는 `mkdir(recursive:true)`가 존재 디렉터리에서 no-op이라
+관측 차이가 없고, `:memory:` 가드 제거는 `dirname(':memory:')`가 이미 존재하는 cwd라 역시
+무관했다. CONTEXT M6 교훈대로 **죽은 `:memory:` 분기를 코드에서 삭제**했다 — 두 경로 모두
+아무것도 막지 않는 방어였다. 재실행 후 `TOTAL=17 SURVIVED=0`.
+
+#### 내 테스트 실측 오류 2건 (기록해 둔다)
+- 카운터 복구 테스트가 "명시적 null 델타 → NULL" 경로를 전제했는데, COALESCE 수정 후엔
+  그 경로로 NULL이 안 만들어졌다. **다른 이유로 실패하는 테스트**였다. "이전 빌드가 이미
+  null로 만든 행"을 raw UPDATE로 세팅하는 전제로 고쳐야 했다. 테스트가 통과하는데
+  엉뚱한 이유로 통과하는 건 통과가 아니다.
+- `enqueueSeed` RED를 처음에 `as SeedInput` 캐스트로 작성했다가 tsc exit 2. `parent_id`가
+  필수라 캐스트로 덮으려니 TS2352. `parent_id: null`을 명시하는 게 관례(`seedRow`)에 맞았다.
+
+#### 최종 실측
+- `npm test` → tests **385** / suites 35 / **pass 381 / fail 4** (Storage 53 → 74 fixture)
+- `npx tsc --noEmit` → exit 0 · `npm run build` → exit 0
+- fail 4건은 #006와 동일 — handoff 신선도, 제품 코드와 무관.

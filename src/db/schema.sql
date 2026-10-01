@@ -113,7 +113,12 @@ CREATE TABLE IF NOT EXISTS wiki_seeds (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   wiki_slug TEXT NOT NULL REFERENCES wikis(slug) ON DELETE CASCADE,
   query TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
+  -- Applies to freshly created databases only: `CREATE TABLE IF NOT EXISTS` is a no-op
+  -- on an existing table, so a database created before this constraint keeps an
+  -- unconstrained `status` column. Those databases are protected by the SEED_STATUSES
+  -- guard in src/db/store.ts, which validates on the way in.
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'active', 'done', 'failed')),
   parent_id INTEGER REFERENCES wiki_seeds(id) ON DELETE SET NULL,
   depth INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))

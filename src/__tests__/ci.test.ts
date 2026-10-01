@@ -10,6 +10,7 @@ const ci = fs.readFileSync(CI_WORKFLOW, 'utf8');
 const GATES = [
   { name: 'test suite', run: 'run: npm test' },
   { name: 'session context', run: 'run: npm run validate:context' },
+  { name: 'session close', run: 'run: npm run session:close' },
 ];
 
 const stepIndex = (needle: string) => ci.indexOf(needle);
