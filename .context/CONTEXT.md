@@ -512,3 +512,55 @@ parent directory is absent`와 `never creates the parent directory of a custom p
 - `npm test` → tests **385** / suites 35 / **pass 381 / fail 4** (Storage 53 → 74 fixture)
 - `npx tsc --noEmit` → exit 0 · `npm run build` → exit 0
 - fail 4건은 #006와 동일 — handoff 신선도, 제품 코드와 무관.
+
+---
+
+## 2026-10-01 세션 종료 — 독립 리뷰 결과와 미해결
+
+### 3차 독립 리뷰 (세션 전체 `c00718d..HEAD`)
+
+blocker 0 · major 1(수정) · minor 2(수정) · nit 0.
+
+**major — `isSyntheticMergeCheckout`의 fallback이 너무 넓었다.** 부모 수 probe를 `GITHUB_REF`가
+없을 때만 돌려야 하는데 `isCI()`이면 돌렸다. main push도 merge commit일 수 있으므로(GitHub 기본
+merge 전략) `refs/heads/main` + merge HEAD가 면제됐다 — 함수 주석과 테스트가 주장한 것과 정반대.
+**직접 재현해 확인**하고, `GITHUB_REF`가 설정돼 있으면 probe를 건너뛰도록 고쳤다. RED 테스트를
+실제 2-부모 merge repo로 만들었고, 수정을 되돌리면 그 테스트가 RED가 되는 것까지 확인했다.
+
+이 발견의 교훈: **면제 조건을 넓힐 때는 "그 조건이 참이 되는 다른 경우"를 먼저 열거한다.**
+`GITHUB_REF`가 없는 경우를 위한 fallback이 `GITHUB_REF`가 있는 경우까지 잡았다.
+
+**minor 2건:** 트리거 write-path 테스트 공백(REPLACE·UPSERT 실측 후 고정), 두 계층 메시지 어구.
+후자는 **리뷰어 지적이 실제보다 강했다** — 실측하니 두 메시지 모두 `one of pending, active, done,
+failed`를 포함해 공유 패턴으로 양쪽 인식이 가능했고, 접두사가 달라 계층 구분은 오히려 된다.
+수정 대신 공유 어구를 테스트로 고정했다.
+
+### 리뷰어가 샌드박스에서 검증하지 못한 것 (메인이 대체 검증)
+
+`GITHUB_ACTIONS=... npm test`, `CI=true npm test`, `node -e`, `sqlite3`이 거부됐다. 그래서
+UPSERT 트리거 동작과 CI 모드 숫자는 INFERENCE였다. 메인이 4모드 전부와 세 write-path를 직접
+실측했다(397 tests / 0 fail, 세 경로 모두 거부).
+
+### 이번 세션 완료 항목
+
+#006 optimizer TDD(뮤턴 25/25) · #026~#030 Storage 결함 5건(뮤턴 17/17) · #028 잔여 트리거
+마이그레이션(기존 DB까지, 뮤턴 5/5) · session-close 게이트 TAP 리포터 결함 · CI freshness 구조
+결함(PR에서 충족 불가) · #035 node 18 종료 · #007 CI 실증(PR #1 3레그 success) · AGENTS.md 8KB
+압축(.context/GATES.md 신설) · npm approve-scripts 설치 정리.
+
+### 최종 실측
+
+4모드(로컬/PR/main/CI=true) **397 tests / 397 pass / 0 fail**, suites 35, test files 15.
+tsc exit 0, build exit 0, `npm run verify` exit 0, `session:close` OK, PR #1 CI 3레그 SUCCESS.
+
+### 미해결 (미검증)
+
+- **PR #1은 초록·MERGEABLE이지만 머지하지 않았다.** main 병합은 사용자 승인 항목이다
+- node 20·22에서 #028 마이그레이션을 end-to-end로 돌리지 않았다(CI 3레그는 통과)
+- #039 `claimPendingSeed` 동시성 — 트랜잭션 래퍼·UNIQUE 제약 없이 문장 원자성만
+- `trainer.ts`·`optimizer/store.ts` 커버리지 0(#036) · `upsertValidation` 반환 계약(#037) ·
+  `metaUpdateEveryEpochs` 미구현(#038) · Search 타입 계약(#032) · `+1` 오버페치 판정(#033) ·
+  `docs/TEST-LOG.md` fts.ts 줄수 드리프트(#034)
+- `AGENTS.md` 8KB advisory가 validate-context에서는 advisory인데 테스트에서는 hard fail이라는
+  구조적 불일치가 남아 있다 — 이번엔 문서를 줄여 양쪽을 통과시켰을 뿐이다
+- #016 증거 커밋 연결, #017 ADR↔Task Contract 교차검사는 부분 구현 상태
