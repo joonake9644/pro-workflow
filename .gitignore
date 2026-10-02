@@ -5,3 +5,9 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+.plan/CAPSULE.md
+
+# 에이전트 도구 자체의 부산물 (node_modules 61M, 런 continuation 기록).
+# 커밋하면 저장소가 오염된다.
+.opencode/
+.omo/

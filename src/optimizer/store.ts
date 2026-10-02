@@ -307,7 +307,7 @@ export function trajectoriesToValidation(
 } {
   const sorted = [...trajectories].sort((a, b) => (a.timesApplied - b.timesApplied) || (a.learningId - b.learningId));
   const valCount = Math.min(holdout, Math.floor(sorted.length / 4));
-  const validationRows = sorted.slice(-valCount);
+  const validationRows = valCount > 0 ? sorted.slice(sorted.length - valCount) : [];
   const trainRows = sorted.slice(0, sorted.length - valCount);
   const validation = validationRows.map((t) => ({
     skillSlug: slug,
@@ -318,5 +318,3 @@ export function trajectoriesToValidation(
   }));
   return { train: trainRows, validation };
 }
-
-export const __test = { trajectoriesToValidation };

@@ -14,14 +14,18 @@ export function getDefaultDbPath(): string {
   return DEFAULT_DB_PATH;
 }
 
-export function ensureDbDir(): void {
-  if (!fs.existsSync(DEFAULT_DB_DIR)) {
-    fs.mkdirSync(DEFAULT_DB_DIR, { recursive: true });
+export function ensureDbDir(dir: string = DEFAULT_DB_DIR): void {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
 export function initializeDatabase(dbPath: string = DEFAULT_DB_PATH): Database.Database {
-  ensureDbDir();
+  // Only the directory the caller actually asked for. Creating the home app directory
+  // as a side effect of an unrelated dbPath litters $HOME and breaks test isolation.
+  // ':memory:' needs no special case: its dirname is the cwd, which existsSync already
+  // reports as present, so no directory is created for it either way.
+  ensureDbDir(path.dirname(path.resolve(dbPath)));
 
   const db = new Database(dbPath);
 

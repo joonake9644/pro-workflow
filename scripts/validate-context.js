@@ -226,16 +226,34 @@ function check(rootArg) {
   // only touch docs/ or .context/ are excluded, otherwise a commit whose only
   // purpose is updating the handoff would make the handoff stale by construction
   // and the rule could never be satisfied.
+  //
+  // Skipped only for a synthetic PR merge checkout. GitHub builds that commit per PR, so
+  // `productHead` there names a sha that did not exist when the branch was written and
+  // cannot be in the handoff by any means — unsatisfiable, not merely unmet. VERIFIED on
+  // run 36831658193, which asked for 728bee0 while the branch head was 0d8fb87.
+  // A push to main checks out a real, nameable commit, so the rule must keep running
+  // there; keying off `CI` alone would disable it everywhere.
   if (fs.existsSync(prompt) && fs.existsSync(path.join(root, '.git'))) {
-    const product = productHead(root);
-    const body = fs.readFileSync(prompt, 'utf8');
-    if (!product) {
-      fail('a readable git history', 'unavailable', 'docs/next-session-prompt.md',
-        'cannot verify that the session handoff reflects the current work');
-    } else if (!hasHeadRef(body, product) && !hasHeadRef(body, gitHead(root) || '')) {
-      fail(`commit ${product} (newest product change) or newer`, 'absent',
-        'docs/next-session-prompt.md',
-        'the session handoff predates product work; re-run the session-end harness');
+    if (isUnnameableHead(root)) {
+      // Report the skip rather than passing silently. An exemption nobody can see is
+      // how a disabled check starts reading as a satisfied one.
+      advisories.push({
+        file: 'docs/next-session-prompt.md',
+        expected: 'a commit the handoff can name',
+        actual: 'not checked (HEAD is the synthetic PR merge commit)',
+        msg: 'handoff freshness is not verified for a PR merge checkout; run `npm run session:close` on the branch',
+      });
+    } else {
+      const product = productHead(root);
+      const body = fs.readFileSync(prompt, 'utf8');
+      if (!product) {
+        fail('a readable git history', 'unavailable', 'docs/next-session-prompt.md',
+          'cannot verify that the session handoff reflects the current work');
+      } else if (!hasHeadRef(body, product) && !hasHeadRef(body, gitHead(root) || '')) {
+        fail(`commit ${product} (newest product change) or newer`, 'absent',
+          'docs/next-session-prompt.md',
+          'the session handoff predates product work; re-run the session-end harness');
+      }
     }
   }
 
@@ -433,12 +451,45 @@ function productHead(root) {
   try {
     return require('child_process')
       .execFileSync('git',
-        ['log', '-1', '--format=%h', '--', '.', ':(exclude)docs', ':(exclude).context'],
+        // AGENTS.md is entry documentation, not product code. Leaving it in made a
+        // close commit that edits both AGENTS.md and the handoff unsatisfiable, since
+        // the handoff inside that commit cannot name the commit it is part of.
+        ['log', '-1', '--format=%h', '--', '.', ':(exclude)docs', ':(exclude).context', ':(exclude)AGENTS.md'],
         { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
       .trim() || null;
   } catch {
     return null;
   }
+}
+
+// A merge commit is created by the VCS after the handoff was written, so a handoff cannot
+// name it. `rev-list --parents` prints `<commit> <parent>...`, so more than two tokens means
+// at least one parent beyond the commit itself. The freshness rule is unsatisfiable in that
+// case and is skipped with a visible advisory; a merge that is TREESAME to a parent resolves
+// `productHead` to that parent, which IS nameable, so it stays checked.
+function isMergeCommit(root) {
+  try {
+    const line = require('child_process')
+      .execFileSync('git', ['rev-list', '--parents', '-n', '1', 'HEAD'],
+        { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
+      .trim();
+    return line.split(/\s+/).length > 2;
+  } catch {
+    return false;
+  }
+}
+
+// The handoff can name a commit only if that commit existed when it was written. Two shapes
+// break that: GitHub's synthetic PR merge (`refs/pull/N/merge`, always unnameable), and any
+// merge commit that is itself the newest product change — including a merge into main, which
+// is why the exemption cannot key off the ref alone. GitHub's merge queue refs also carry a
+// synthetic merge and are covered by the second shape.
+function isUnnameableHead(root) {
+  const ref = process.env.GITHUB_REF || '';
+  if (ref.startsWith('refs/pull/')) return true;
+  if (!isMergeCommit(root)) return false;
+  const head = gitHead(root);
+  return Boolean(head) && productHead(root) === head;
 }
 
 function hasHeadRef(text, head) {
@@ -468,10 +519,13 @@ function main() {
   const root = path.resolve(process.argv[2] || path.join(__dirname, '..'));
   const { failures, advisories, exemptions } = check(root);
 
+  // Printed regardless of failures: an exemption that disappears from a red run is
+  // exactly the "disabled check reads as a satisfied check" failure this guards against.
+  for (const a of advisories || []) {
+    console.log(`  [ADVISORY] ${a.file}: ${a.msg} (expected ${a.expected}, actual ${a.actual})`);
+  }
+
   if (failures.length === 0) {
-    for (const a of advisories || []) {
-      console.log(`  [ADVISORY] ${a.file}: ${a.msg} (expected ${a.expected}, actual ${a.actual})`);
-    }
     console.log(`validate-context: OK (${path.basename(root)})`);
     const ex = exemptions || [];
     if (ex.length) {

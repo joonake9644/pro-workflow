@@ -56,16 +56,15 @@ describe('initializeDatabase', () => {
     }
   });
 
-  it('throws a TypeError, not a SqliteError, when the parent directory is absent', () => {
-    assert.throws(
-      () => initializeDatabase(path.join(dir, 'nope', 'x.db')),
-      (err: Error) => err instanceof TypeError && /directory does not exist/.test(err.message)
-    );
-  });
-
-  it('never creates the parent directory of a custom path', () => {
-    try { initializeDatabase(path.join(dir, 'absent', 'x.db')); } catch { /* expected */ }
-    assert.equal(fs.existsSync(path.join(dir, 'absent')), false);
+  it('creates the parent directory the caller asked for', () => {
+    const p = path.join(dir, 'made', 'deeper', 'x.db');
+    const db = initializeDatabase(p);
+    try {
+      assert.equal(fs.existsSync(path.join(dir, 'made', 'deeper')), true,
+        'a custom path is honoured all the way down, not only the home default');
+    } finally {
+      db.close();
+    }
   });
 
   it('requests WAL, so a file-backed database actually reports it', () => {
@@ -122,9 +121,13 @@ describe('createStore', () => {
       assert.equal(got.length, 2, 'project-less rows are treated as globally visible');
     });
 
-    it('an empty-string project filter returns everything, not a filtered set', () => {
-      seed(); seed({ project: 'other' });
-      assert.equal(store.getAllLearnings('').length, 2);
+    it('an empty-string project filter filters, rather than widening to everything', () => {
+      seed({ project: '' }); seed({ project: 'other' }); seed({ project: null });
+      assert.deepEqual(
+        store.getAllLearnings('').map(l => l.project).sort(),
+        ['', null],
+        'an empty project is a real filter value; only undefined means "no filter"',
+      );
     });
 
     it('updateLearning reports true for a real field change', () => {
@@ -143,11 +146,23 @@ describe('createStore', () => {
       assert.equal(store.getLearning(l.id)?.rule, 'rule-a');
     });
 
-    it('updateLearning silently ignores project while still reporting success', () => {
+    it('updateLearning persists a project change instead of dropping it', () => {
       const l = seed({ project: 'proj' });
       assert.equal(store.updateLearning(l.id, { project: 'other' }), true);
-      assert.equal(store.getLearning(l.id)?.project, 'proj',
-        'project is not in the COALESCE list, so the change is dropped');
+      assert.equal(store.getLearning(l.id)?.project, 'other');
+    });
+
+    it('updateLearning keeps the old project when the new one is null', () => {
+      const l = seed({ project: 'proj' });
+      store.updateLearning(l.id, { project: null as unknown as string });
+      assert.equal(store.getLearning(l.id)?.project, 'proj');
+    });
+
+    it('updateLearning stores an empty-string project rather than treating it as null', () => {
+      const l = seed({ project: 'proj' });
+      store.updateLearning(l.id, { project: '' });
+      assert.equal(store.getLearning(l.id)?.project, '',
+        'COALESCE keeps "" as a value; only null means "leave unchanged"');
     });
 
     it('deleteLearning reports whether a row was removed', () => {
@@ -216,6 +231,36 @@ describe('createStore', () => {
       assert.equal(store.getSession('s1')?.id, 's1');
     });
 
+    it('refuses a missing session id instead of writing a NULL-keyed row', () => {
+      assert.throws(
+        () => store.startSession(undefined as unknown as string),
+        /session id/i,
+        'a NULL id cannot be looked up or cleaned up through the public API',
+      );
+      assert.equal(store.getSession(undefined as unknown as string), undefined);
+      assert.equal(
+        one<{ c: number }>(store.db, 'SELECT count(*) AS c FROM sessions').c,
+        0,
+        'the refusal must happen before the row is written, not after',
+      );
+    });
+
+    it('refuses an empty session id, which is just as unusable as a missing one', () => {
+      assert.throws(() => store.startSession(''), /session id/i);
+      assert.equal(one<{ c: number }>(store.db, 'SELECT count(*) AS c FROM sessions').c, 0);
+    });
+
+    it('refuses a second row with a NULL id, which a PRIMARY KEY alone does not block', () => {
+      // SQLite lets NULL repeat in a UNIQUE index, so a bare PRIMARY KEY is not a gate here.
+      assert.doesNotThrow(() => store.db.exec(`INSERT INTO sessions (id, project) VALUES (NULL, 'x')`));
+      assert.doesNotThrow(() => store.db.exec(`INSERT INTO sessions (id, project) VALUES (NULL, 'y')`));
+      assert.equal(
+        one<{ c: number }>(store.db, `SELECT count(*) AS c FROM sessions WHERE id IS NULL`).c,
+        2,
+        'this is the schema hole the application guard exists to cover',
+      );
+    });
+
     it('ignores a duplicate session id rather than throwing', () => {
       store.startSession('dup', 'first');
       const again = store.startSession('dup', 'second');
@@ -240,12 +285,31 @@ describe('createStore', () => {
       assert.equal(s?.prompts_count, 5);
     });
 
-    it('explicit nulls null the counters instead of leaving them alone', () => {
+    it('recovers counters that an older build already nulled', () => {
       store.startSession('s4');
       store.updateSessionCounts('s4', 3, 3, 3);
-      store.updateSessionCounts('s4', null as unknown as number, null as unknown as number, null as unknown as number);
-      const s = store.getSession('s4');
-      assert.equal(s?.edit_count, null, 'NULL + 0 stays NULL, so the default path cannot restore it');
+      // The historical defect: `= @edits` bound an explicit null straight into the column,
+      // and SQLite's `NULL + 0 = NULL` meant no later call could ever restore it.
+      store.db.prepare(
+        'UPDATE sessions SET edit_count = NULL, corrections_count = NULL, prompts_count = NULL WHERE id = ?',
+      ).run('s4');
+      assert.equal(store.getSession('s4')?.edit_count, null, 'precondition: the row is damaged');
+
+      store.updateSessionCounts('s4', 1, 1, 1);
+      const repaired = store.getSession('s4');
+      assert.deepEqual(
+        [repaired?.edit_count, repaired?.corrections_count, repaired?.prompts_count],
+        [1, 1, 1],
+        'COALESCE lets an already-damaged row recover instead of staying NULL forever',
+      );
+    });
+
+    it('treats a null delta as zero rather than nulling the counter', () => {
+      store.startSession('s5');
+      store.updateSessionCounts('s5', 2, 2, 2);
+      store.updateSessionCounts('s5', null as unknown as number, null as unknown as number, null as unknown as number);
+      const s = store.getSession('s5');
+      assert.deepEqual([s?.edit_count, s?.corrections_count, s?.prompts_count], [2, 2, 2]);
     });
 
     it('getRecentSessions returns the most recent first and honours the limit', () => {
@@ -290,12 +354,22 @@ describe('createStore', () => {
       assert.match((caught as Error).message, /already registered/);
     });
 
-    it('lists by scope, and an empty scope returns everything', () => {
+    it('lists by scope, and an empty scope filters instead of widening', () => {
       store.upsertWiki({ slug: 'g', title: 'G', flavor: 'research', root_path: '/g' });
       store.upsertWiki({ slug: 'p', title: 'P', flavor: 'research', root_path: '/p', scope: 'project' });
       assert.equal(store.listWikis('project').length, 1);
-      assert.equal(store.listWikis('' as never).length, 2,
-        'an empty scope is falsy at runtime, so it widens to every wiki');
+      assert.equal(store.listWikis(undefined).length, 2, 'omitting the filter returns every wiki');
+      assert.equal(store.listWikis('' as never).length, 0,
+        'an empty scope matches no wiki; it must not be confused with "no filter"');
+    });
+
+    it('refuses a non-string scope with a readable error instead of a raw SQLite bind failure', () => {
+      store.upsertWiki({ slug: 'g', title: 'G', flavor: 'research', root_path: '/g' });
+      assert.throws(
+        () => store.listWikis(true as never),
+        /scope must be/,
+        'wiki list --scope arrives as boolean true; a SQLite bind error would be unreadable there',
+      );
     });
 
     it('deleteWiki reports removal and cascades to wiki_pages', () => {
@@ -488,11 +562,139 @@ describe('createStore', () => {
       assert.equal(store.claimPendingSeed('w')?.query, 'b');
     });
 
-    it('setSeedStatus stores an arbitrary status without validating it', () => {
+    it('enqueueSeed refuses a status outside the four known states', () => {
+      const w = store.upsertWiki({ slug: 'we', title: 'E', flavor: 'research', root_path: '/e' });
+      assert.throws(
+        () => store.enqueueSeed({ wiki_slug: w.slug, query: 'q', depth: 0, parent_id: null, status: 'BOGUS' as SeedInput['status'] }),
+        /BOGUS/,
+        'a row inserted directly in a bogus state is unreachable by the queue, the report, and cancel',
+      );
+      assert.equal(
+        one<{ c: number }>(store.db, 'SELECT count(*) AS c FROM wiki_seeds WHERE query = ?', 'q').c,
+        0,
+        'the refusal must happen before the row is written',
+      );
+    });
+
+    it('enqueueSeed still accepts the four known states', () => {
+      const w = store.upsertWiki({ slug: 'wf', title: 'F', flavor: 'research', root_path: '/f' });
+      for (const status of ['pending', 'active', 'done', 'failed'] as const) {
+        const row = store.enqueueSeed({ wiki_slug: w.slug, query: `q-${status}`, depth: 0, parent_id: null, status });
+        assert.equal(row.status, status);
+      }
+    });
+
+    it('enqueueSeed defaults to pending when no status is given', () => {
+      const w = store.upsertWiki({ slug: 'wg', title: 'G', flavor: 'research', root_path: '/g' });
+      assert.equal(store.enqueueSeed({ wiki_slug: w.slug, query: 'q', depth: 0, parent_id: null }).status, 'pending');
+    });
+
+    it('setSeedStatus refuses a status outside the four known states', () => {
       const s = seedRow('q');
-      store.setSeedStatus(s.id, 'BOGUS' as never);
+      assert.throws(
+        () => store.setSeedStatus(s.id, 'BOGUS' as never),
+        /BOGUS/,
+        'a bogus status is invisible to the queue, to the report buckets, and to cancel',
+      );
       const row = one<{ status: string }>(store.db, 'SELECT status FROM wiki_seeds WHERE id = ?', s.id);
-      assert.equal(row.status, 'BOGUS', 'there is no CHECK constraint or enum on status');
+      assert.equal(row.status, 'pending', 'the row must be left untouched when the write is refused');
+    });
+
+    it('the database refuses a bogus status even when the application guard is bypassed', () => {
+      const s = seedRow('q2');
+      assert.throws(
+        () => store.db.prepare(`UPDATE wiki_seeds SET status = 'BOGUS' WHERE id = ?`).run(s.id),
+        /must be one of pending, active, done, failed/,
+        'a trigger is the last line of defense against a row no read path can reach',
+      );
+      assert.throws(
+        () => store.db.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'q', 0, 'BOGUS')`).run(),
+        /must be one of/,
+        'INSERT must be guarded too, not only UPDATE',
+      );
+    });
+
+    it('names the same status vocabulary whether the app layer or the trigger rejects', () => {
+      // The prefixes differ on purpose (which layer rejected is useful), but both must
+      // carry the shared vocabulary so one pattern can recognise either rejection.
+      const shared = /one of pending, active, done, failed/;
+      const appMsg = (() => {
+        try { store.setSeedStatus(seedRow('qv').id, 'BOGUS' as never); return ''; }
+        catch (e) { return (e as Error).message; }
+      })();
+      const triggerMsg = (() => {
+        const s = seedRow('qw');
+        try { store.db.prepare(`UPDATE wiki_seeds SET status = 'BOGUS' WHERE id = ?`).run(s.id); return ''; }
+        catch (e) { return (e as Error).message; }
+      })();
+      assert.match(appMsg, shared, 'the application guard must carry the vocabulary');
+      assert.match(triggerMsg, shared, 'the trigger must carry the same vocabulary');
+    });
+
+    it('guards every write path, including REPLACE and UPSERT', () => {
+      // The two BEFORE triggers have to cover the conflict-resolution forms too, or a
+      // future switch of enqueueSeed to an UPSERT would reopen the hole silently.
+      const s = seedRow('qp');
+      assert.throws(
+        () => store.db.prepare(
+          `INSERT OR REPLACE INTO wiki_seeds (id, wiki_slug, query, depth, status) VALUES (?, 'w', 'x', 0, 'BOGUS')`,
+        ).run(s.id),
+        /must be one of/,
+        'INSERT OR REPLACE is a delete-then-insert, so the insert trigger must fire',
+      );
+      assert.throws(
+        () => store.db.prepare(
+          `INSERT INTO wiki_seeds (id, wiki_slug, query, depth, status) VALUES (?, 'w', 'y', 0, 'pending')
+           ON CONFLICT(id) DO UPDATE SET status = 'BOGUS'`,
+        ).run(s.id),
+        /must be one of/,
+        'the DO UPDATE branch of an UPSERT must hit the update trigger',
+      );
+      // The rejected writes must not have landed.
+      const row = one<{ status: string }>(store.db, 'SELECT status FROM wiki_seeds WHERE id = ?', s.id);
+      assert.equal(row.status, 'pending');
+    });
+
+    it('upgrades a legacy database that was created before the status triggers existed', () => {
+      // This is the point of #028's remainder: a CHECK could never reach an existing
+      // table, but `CREATE TRIGGER IF NOT EXISTS` is a separate statement and does.
+      const legacy = initializeDatabase(':memory:');
+      legacy.exec('DROP TRIGGER wiki_seeds_status_valid_insert');
+      legacy.exec('DROP TRIGGER wiki_seeds_status_valid_update');
+      legacy.exec('DROP TABLE wiki_seeds');
+      legacy.exec(`CREATE TABLE wiki_seeds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wiki_slug TEXT NOT NULL REFERENCES wikis(slug) ON DELETE CASCADE,
+        query TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        parent_id INTEGER REFERENCES wiki_seeds(id) ON DELETE SET NULL,
+        depth INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`);
+      legacy.prepare(`INSERT INTO wikis (slug, title, flavor, root_path) VALUES ('w', 'W', 'research', '/w')`).run();
+      // Pre-condition: the legacy table accepts a bogus status.
+      legacy.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'old', 0, 'BOGUS')`).run();
+      assert.equal(
+        one<{ c: number }>(legacy, `SELECT count(*) AS c FROM wiki_seeds WHERE status = 'BOGUS'`).c, 1,
+        'precondition: the legacy table is unconstrained',
+      );
+
+      // Re-running the schema (what initializeDatabase does on open) must install the guard.
+      legacy.exec(fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8'));
+      assert.throws(
+        () => legacy.prepare(`INSERT INTO wiki_seeds (wiki_slug, query, depth, status) VALUES ('w', 'new', 0, 'BOGUS')`).run(),
+        /must be one of/,
+        'the re-run schema must guard a table it did not create',
+      );
+      legacy.close();
+    });
+
+    it('setSeedStatus still accepts all four known states', () => {
+      const s = seedRow('q3');
+      for (const status of ['pending', 'active', 'done', 'failed'] as const) {
+        store.setSeedStatus(s.id, status);
+        assert.equal(one<{ status: string }>(store.db, 'SELECT status FROM wiki_seeds WHERE id = ?', s.id).status, status);
+      }
     });
 
     it('setSeedStatus no-ops for an unknown id', () => {

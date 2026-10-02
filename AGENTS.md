@@ -1,5 +1,14 @@
 # AGENTS.md — pro-workflow-lab
 
+<!-- PLAN-RULES:BEGIN (plan-continuity-harness v2) -->
+계획·사용자 지시·결정의 정본은 공유 원장이다(브랜치·작업트리 공통). 맥락에 「계획 캡슐」이 없으면 작업 전에 `node .plan/bin/plan.mjs inject`를 실행해 읽고 캡슐 규칙을 따른다. 세션 끝에 `node .plan/bin/plan.mjs check --close`.
+<!-- PLAN-RULES:END -->
+
+## Git push 정책 (사용자 상시 승인, 2026-09-29)
+
+- 기능 브랜치(main·master 제외)의 push와 PR 생성은 사용자가 상시 승인했다. 검사를 통과한 커밋은 묻지 말고 push한다.
+- main·master 직접 push, force push, 병합, 배포는 매번 사용자에게 묻는다.
+
 프로젝트 단위 작업 규칙. 전역 `~/.claude/CLAUDE.md`와 함께 적용되며, 충돌 시 이 파일이
 프로젝트 고유 경계를 정의한다.
 
@@ -24,6 +33,7 @@
 이 파일은 매 세션 통째로 읽히므로 **150줄 이하**를 유지한다(하드). 8KB는 advisory, 절대 한계는
 12KB다. 세 값 모두 `npm run validate:context`가 검사한다. 세부는 경로로만 가리킨다.
 2026-07 Red Hat 가이드는 예산을 바이트가 아니라 **줄**로 제시한다("150줄 미만").
+**이 파일이 8KB를 넘으면 상세는 `.context/`로 옮기고 경로만 남긴다** — 더티 상태로 두지 않는다.
 
 1. `.context/STATE`의 `checkpoint`와 `blockers`만 읽는다 (한 줄 JSON).
 2. 그다음 `.context/TODO.md`에서 `todo_active`의 stage를 확인한다.
@@ -41,18 +51,7 @@
 
 1. **독립 코드 리뷰 실행.** 메인 컨텍스트의 자기 판단으로 판정하지 않는다. 새
    프로세스·새 컨텍스트에서 메인이 작성한 내용을 보지 않은 상태로 리뷰시킨다.
-
-   ```bash
-   opencode run --model "opencode-go/deepseek-v4.1-flash" \
-     --dir "$PWD" "<리뷰 대상 커밋/범위와 리뷰 요구사항>"
-   ```
-
-   리뷰 프롬프트에는 반드시 다음을 포함한다.
-   - 리뷰 대상을 명시 (`git show <sha>` / diff 범위)
-   - "작성자를 신뢰하지 말고, 동기 부여 설명도 검증 대상"이라는 지시
-   - `VERIFIED` / `INFERENCE` 라벨링 강제
-   - 수정 금지(리뷰만), 발견은 `[SEVERITY] file:line` + VERIFIED/IMPACT/FIX 형식
-   - 심각도 등급이 비어 있는 등급은 **명시적으로** 보고할 것
+   상세(모델·프롬프트 필수 항목·출력 형식)는 `.context/GATES.md`의 리뷰 절을 따른다.
 
 2. **리뷰 실측 확인.** 리뷰어가 실제로 명령을 실행해 결과를 냔는지 확인한다.
    권한 거부·도구 실패로 **중간에 끊긴 리뷰는 완료된 리뷰가 아니다.** 미완료라면
@@ -68,9 +67,8 @@
 5. **체크포인트 갱신.** `.context/STATE`와 `.context/CONTEXT.md`에 리뷰 결과와
    미해결 항목을 기록한다. 미검증 항목은 반드시 "미검증"으로 남긴다.
 
-6. **사용자에게 보고.** 실제 명령 출력으로 뒷받침된 것만 보고한다. 추측·예측을
-   결과로 제시하지 않는다. 무엇을 검증했고 무엇을 검증하지 못했는지 구분해
-   明시한다.
+6. **사용자에게 보고.** 실측으로 뒷받침된 것만 보고한다. 무엇을 검증했고
+   무엇을 검증하지 못했는지 구분해 明시한다.
 
 ### 리뷰 결과 처리 규칙
 
@@ -97,22 +95,14 @@
 | CI가 테스트를 돌릴 것 | `.github/workflows/ci.yml`의 `Run tests` 스텝. 제거하거나 matrix job 밖으로 옮기면 `src/__tests__/ci.test.ts`가 실패 |
 | 컨텍스트 파일이 유효할 것 | `npm run validate:context` → `scripts/validate-context.js` |
 | 이 세 가지를 한 번에 | `npm run verify` (check → test → validate:context) |
-| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋이 handoff에 기록됨. 위반 시 exit 1 (`npm run session:close`) |
+| 세션 종료가 실제로 happened | `docs/next-session-prompt.md`의 `baseline` 절 + `TOOL_LABEL` + 80줄 캡, `docs/sessions/<날짜>/` 6개 파일, `docs/` 루트 동기화, 제품 커밋 기록. 종료 게이트는 handoff의 테스트 수치를 **실측과 대조**한다 — sha가 있어도 숫자가 틀리면 exit 1 (`npm run session:close`) |
 | 독립 리뷰가 실제로 돌아갔는가 | 날짜 폴더와 `docs/REVIEW.md` 양쪽에 `REVIEW_MODEL`·`REVIEW_RESULT` **둘 다** 있어야 한다. 하나만 있으면 실패 |
 | 날짜 스냅샷 없이 세션이 안 닫혔는가 | `docs/sessions/<날짜>/` 폴더가 없으면 실패 — 폴더가 없으면 리뷰 규칙이 아예 돌지 않는다 |
 | 이력 문서가 현재본을 덮지 않음 | `docs/DONE.md` 금지. DONE은 날짜 폴더 전용 (20개 프로젝트 중 15개가 루트에 없음) |
 | 이 문서가 규칙의 유일한 원본 | `validate-context`의 CLAUDE.md import·중복 검사 |
 
-`scripts/validate-context.js`가 검사하는 것: AGENTS.md 150줄 하드·12KB 절대·8KB advisory·200B 하한,
-`CLAUDE.md`의 `@AGENTS.md` import와 규칙 비중복, `.context/STATE` 7필드 타입, `todo_active`이
-TODO.md에 존재, 심볼릭 링크가 저장소를 벗어나지 않음, 가짜 증거 차단, ADR 상태 라인,
-CONTEXT/TODO/glossary 존재·비어있지 않음, 커밋되는 문서 전체의 절대 홈경로 없음. 위반 시 고칠 파일·
-예상값·실제값을 출력하고 exit 1. AI 호출과 네트워크를 쓰지 않는다.
-
-pre-commit 훅은 **연결하지 않았다**. 이 클론은 `core.hooksPath`가 설정되어 있지 않고
-`scripts/commit-validate.js`도 opt-in(`scripts/setup-hook.js`) 구조라, Git 훅 경로는
-기존 방식을 따르려 하지 않고 CI만 게이트로 썼다. 로컬 커밋 전 게이트가 필요하면
-`npm run verify`를 직접 돌린다.
+각 게이트가 **무엇을 검사하는지**의 상세는 `.context/GATES.md`에 있다. 표는 "무엇을 막는가"만
+담는다 — 상세는 경로로만 가리켜 8KB advisory를 넘기지 않는다.
 
 ---
 
