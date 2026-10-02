@@ -492,54 +492,6 @@ function isUnnameableHead(root) {
   return Boolean(head) && productHead(root) === head;
 }
 
-function productHead(root) {
-  try {
-    return require('child_process')
-      .execFileSync('git',
-        // AGENTS.md is entry documentation, not product code. Leaving it in made a
-        // close commit that edits both AGENTS.md and the handoff unsatisfiable, since
-        // the handoff inside that commit cannot name the commit it is part of.
-        ['log', '-1', '--format=%h', '--', '.', ':(exclude)docs', ':(exclude).context', ':(exclude)AGENTS.md'],
-        { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
-      .trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-// `CI=false` / `CI=0` are how a developer opts out; treat only a truthy value as CI.
-function isCI() {
-  for (const v of [process.env.CI, process.env.GITHUB_ACTIONS]) {
-    if (v && v !== 'false' && v !== '0') return true;
-  }
-  return false;
-}
-
-// The freshness rule is only unsatisfiable when HEAD is the synthetic merge commit
-// GitHub builds for a pull request. GitHub names that case precisely with GITHUB_REF
-// (`refs/pull/N/merge`), so that is the primary signal. A push to main keeps
-// `refs/heads/...` and stays checkable — and it may well BE a merge commit (GitHub's
-// default merge strategy), so the parent-count probe must not run when a branch ref is
-// present, or it would silently stop verifying main.
-function isSyntheticMergeCheckout(root) {
-  const ref = process.env.GITHUB_REF || '';
-  if (ref.startsWith('refs/pull/')) return true;
-  // An explicit non-pull ref is trustworthy: this is not the PR merge checkout.
-  if (ref) return false;
-  // Fallback for a CI that checks out a merge commit without naming the ref. Only reached
-  // when GITHUB_REF is unset, so a `refs/heads/main` merge commit is never exempted.
-  if (!isCI()) return false;
-  try {
-    const line = require('child_process')
-      .execFileSync('git', ['rev-list', '--parents', '-n', '1', 'HEAD'],
-        { cwd: root, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' })
-      .trim();
-    return line.split(/\s+/).length > 2;
-  } catch {
-    return false;
-  }
-}
-
 function hasHeadRef(text, head) {
   for (const token of text.match(/\b[0-9a-f]{7,40}\b/gi) || []) {
     if (token.toLowerCase().startsWith(head.toLowerCase())) return true;

@@ -197,3 +197,41 @@ product를 건드리는 fixture(`unnameableMergeRepo`)와 TREESAME fixture(`merg
 
 4모드 **398 tests / 398 pass / 0 fail**, tsc exit 0, build exit 0, session:close OK.
 뮤턴 A/B 양방향 RED 확인.
+
+---
+
+## 5차 리뷰 (최종 술어 변경 `3d93241`) — 2026-10-01
+
+REVIEW_MODEL: opencode-go/deepseek-v4.1-flash
+REVIEW_SCOPE: `3d93241` 단일 커밋(및 그 테스트)
+REVIEW_RESULT: blocker 0, major 0, minor 2(수정), nit 2(수정)
+
+### [minor] `productHead` 중복 정의 — **수정** (메인 편집 실수)
+
+리뷰어 지적: `productHead`가 450행과 495행에 두 번 정의됐다(커밋 전 1개 → 후 2개).
+
+**원인은 메인의 Python 치환 버그다.** 교체 구간의 `end`(productHead 시작 위치)가 `start`(isCI
+주석)보다 **앞**이라 `s[:start] + new + s[end:]`가 [end:start] 구간을 복제했다. 두 정의의 본문이
+동일하고 함수 선언이 호이스팅되므로 런타임 영향은 없었고 테스트도 전부 통과했다 — **그래서
+조용했다.** 리뷰가 아니었으면 남았을 결함이다. 중복 정의와 함께 죽은 `isCI`·`isSyntheticMergeCheckout`
+(48행)을 제거했다.
+
+### [minor] 죽은 코드 — **수정** (위와 함께 제거)
+
+`isSyntheticMergeCheckout`은 호출 0건, `isCI`는 그 죽은 함수만 먹였다.
+
+### [nit] 중복 테스트 — **수정**
+
+`a nameable merge ...` 테스트가 기존 `a merge commit on a main push ...`와 fixture·단언이
+동일했다. 중복을 제거하고 남은 테스트의 주석을 실제 이유(TREESAME이라 이름 붙일 수 있음)로
+정정했다.
+
+### [nit] sanity 검사가 구현과 같은 명령을 재실행 — **수용**
+
+fixture 전제 검사가 `productHead`와 동일한 git 명령을 써서 pathspec 결함은 못 잡는다. 다만
+fixture 모양(merge vs TREESAME)은 정확히 잡으므로 의도한 역할은 한다. 남겨둔다.
+
+### 검증
+
+뮤턴 A(`productHead===gitHead` 검사 제거 → 모든 merge 면제)와 B(`refs/pull` 조기 반환 제거)를
+모두 테스트가 검출. 4모드 **397 tests / 397 pass / 0 fail**, tsc exit 0, build exit 0.

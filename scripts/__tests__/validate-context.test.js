@@ -867,16 +867,17 @@ function mergeCommitRepo(extraFiles = {}) {
   return root;
 }
 
-test('a merge commit on a main push is still checked, not treated as a PR', () => {
-  // GitHub's default merge strategy leaves a two-parent HEAD on main. Exempting on parent
-  // count alone would silently stop verifying freshness on exactly that path.
+test('a nameable merge on main is still checked, not exempted as a PR', () => {
+  // Only the topic side touches product paths, so this merge is TREESAME to that parent and
+  // `productHead` resolves to the feature commit — which the handoff can and must name. The
+  // rule must still run; exempting every merge would silently stop verifying this path.
   const root = mergeCommitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
 
   withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
     const { failures, advisories } = check(root);
     assert.ok(msgs(failures).some(m => m.includes('predates product work')),
-      'a stale handoff on a main merge must be reported — the parent fallback must not fire when a branch ref is present');
+      'a nameable newer product commit must still be required in the handoff');
     assert.ok(!(advisories || []).some(a => a.msg.includes('freshness is not verified')));
   });
   fs.rmSync(root, { recursive: true, force: true });
@@ -928,19 +929,6 @@ test('an unnameable merge on main is exempt, but only because the handoff cannot
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a nameable merge (TREESAME to a parent) on main is still checked', () => {
-  // Only the topic side touches product paths, so `productHead` is that feature commit —
-  // nameable. The rule must still run and report a stale handoff.
-  const root = mergeCommitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
-  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
-  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
-    const { failures, advisories } = check(root);
-    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
-      'a nameable newer product commit must still be required in the handoff');
-    assert.ok(!(advisories || []).some(a => a.msg.includes('freshness is not verified')));
-  });
-  fs.rmSync(root, { recursive: true, force: true });
-});
 test('CI=false opts out, so the exemption is not triggered by a falsy value', () => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
