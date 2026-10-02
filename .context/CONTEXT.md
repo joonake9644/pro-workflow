@@ -564,3 +564,17 @@ tsc exit 0, build exit 0, `npm run verify` exit 0, `session:close` OK, PR #1 CI 
 - `AGENTS.md` 8KB advisory가 validate-context에서는 advisory인데 테스트에서는 hard fail이라는
   구조적 불일치가 남아 있다 — 이번엔 문서를 줄여 양쪽을 통과시켰을 뿐이다
 - #016 증거 커밋 연결, #017 ADR↔Task Contract 교차검사는 부분 구현 상태
+
+### 4차 리뷰 — 교훈 (면제 조건의 반례를 먼저 찾아라)
+
+3차에서 main merge의 freshness 문제를 "고쳤다고" 판단한 것이 틀렸다. **면제 조건을 좁히면서
+그 조건이 참이 되는 다른 경우를 열거하지 않았다.** "non-pull ref ⇒ HEAD는 이름 붙일 수 있다"는
+명제는 main으로 들어오는 merge commit에서 거짓이다 — productHead가 그 merge 자신이면 handoff는
+존재하지 않던 커밋을 이름 붙일 수 없다.
+
+진짜 참 조건은 **"HEAD가 이름 붙일 수 없는 merge인가"**이고, 이는 환경(ref)이 아니라 커밋
+모양(merge + productHead===gitHead)의 문제다. 술어를 그렇게 바꾸니 merge-queue ref라는 잠복
+경우까지 함께 해결됐다.
+
+**규칙: 어떤 조건을 면제 근거로 쓸 때, 그 조건이 참이면서 문제가 아닌 경우를 먼저 열거한다.**
+열거하지 못하면 그 조건은 아직 근거가 아니다.

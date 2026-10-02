@@ -47,7 +47,7 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 
 ## baseline 상태
 <!-- npm run verify 결과 -->
-- passed: 397 / failed: 0 / suites: 35 / test files discovered: 15
+- passed: 398 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
 - 제품 커밋: f3f42e0 (세션 종료 리뷰 major 수정 — main merge push의 freshness)

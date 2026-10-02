@@ -882,28 +882,65 @@ test('a merge commit on a main push is still checked, not treated as a PR', () =
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a synthetic merge is detected by parent count when GITHUB_REF is absent', () => {
-  // Fallback for a CI that checks out a merge commit without naming the ref.
+// A merge whose two parents both touch product paths: the merge itself is the newest
+// product change, so `productHead` returns a commit the handoff cannot have named.
+function unnameableMergeRepo() {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
-  // Read the initial branch rather than assuming master/main — `git init` default varies.
   const base = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root })
     .toString().trim();
+  // Branch FIRST, then advance both sides, so they genuinely diverge. Committing on base
+  // before branching would make topic a descendant and the merge TREESAME to it, which is
+  // the nameable case, not this one.
   execFileSync('git', ['checkout', '-q', '-b', 'topic'], { cwd: root, stdio: 'ignore' });
-  writeIn(root, 'src/feature.ts', 'export const x = 1;\n');
+  writeIn(root, 'src/feature.ts', 'export const f = 2;\n');
   execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['commit', '-q', '-m', 'topic work'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['checkout', '-q', base], { cwd: root, stdio: 'ignore' });
+  writeIn(root, 'src/base.ts', 'export const b = 1;\n');
+  execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-q', '-m', 'base product work'], { cwd: root, stdio: 'ignore' });
   execFileSync('git', ['merge', '--no-ff', '--no-edit', '-q', 'topic'], { cwd: root, stdio: 'ignore' });
+  return root;
+}
 
-  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: undefined, CI: 'true' }, () => {
+test('an unnameable merge on main is exempt, but only because the handoff cannot name it', () => {
+  // Both parents touched product paths, so `productHead` is the merge commit itself, which
+  // was created after the handoff. Failing here would make the rule unsatisfiable on a
+  // perfectly ordinary merge into main.
+  const root = unnameableMergeRepo();
+  const mergeSha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })
+    .toString().trim();
+  // Sanity: the fixture really is the shape under test.
+  assert.equal(
+    execFileSync('git', ['log', '-1', '--format=%h', '--', '.', ':(exclude)docs', ':(exclude).context', ':(exclude)AGENTS.md'],
+      { cwd: root }).toString().trim(),
+    mergeSha,
+    'fixture precondition: the merge must be the newest product change',
+  );
+
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
     const { failures, advisories } = check(root);
     assert.ok(!msgs(failures).some(m => m.includes('predates product work')),
-      'a two-parent HEAD in CI is the synthetic merge; it must be exempt');
-    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified')));
+      'a handoff cannot name a merge commit that did not exist when it was written');
+    assert.ok((advisories || []).some(a => a.msg.includes('freshness is not verified')),
+      'the exemption must stay visible');
   });
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a nameable merge (TREESAME to a parent) on main is still checked', () => {
+  // Only the topic side touches product paths, so `productHead` is that feature commit —
+  // nameable. The rule must still run and report a stale handoff.
+  const root = mergeCommitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
+  fs.writeFileSync(path.join(root, 'docs', 'next-session-prompt.md'), HANDOFF_OK('\ncommit: 0000000\n'));
+  withEnv({ GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', CI: 'true' }, () => {
+    const { failures, advisories } = check(root);
+    assert.ok(msgs(failures).some(m => m.includes('predates product work')),
+      'a nameable newer product commit must still be required in the handoff');
+    assert.ok(!(advisories || []).some(a => a.msg.includes('freshness is not verified')));
+  });
+  fs.rmSync(root, { recursive: true, force: true });
+});
 test('CI=false opts out, so the exemption is not triggered by a falsy value', () => {
   const root = gitRepo({ 'docs/next-session-prompt.md': HANDOFF_OK() });
   const head = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { cwd: root })

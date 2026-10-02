@@ -149,3 +149,51 @@ stale handoff 보고)를 추가하고, 수정을 되돌리면 그 테스트가 R
 리뷰어는 `GITHUB_ACTIONS=... npm test`, `CI=true npm test`, `node -e`, `sqlite3`을 거부당했다.
 따라서 UPSERT 트리거 동작과 CI 모드 숫자는 INFERENCE였다. **메인이 4모드 전부와 UPSERT 경로를
 직접 실측**해 대체 검증했다(397 tests / 0 fail, 세 경로 모두 거부).
+
+---
+
+## 4차 리뷰 (직전 수정분 `d7af03f..HEAD`) — 2026-10-01
+
+REVIEW_MODEL: opencode-go/deepseek-v4.1-flash
+REVIEW_SCOPE: `d7af03f..HEAD` — 3차 리뷰의 major 수정(`f3f42e0`)이 대상
+REVIEW_RESULT: blocker 0, major 1(수정), minor 1(포섭), nit 1(수정)
+
+### [major] 수정이 조용한 건너뛰기를 hard failure로 바꿨다 — **수정**
+
+리뷰어 지적: 이전 술어 "non-pull ref ⇒ HEAD는 이름 붙일 수 있다"는 **거짓**이다. main으로
+들어오는 merge commit 중 productHead가 **그 merge 자신**인 경우(양쪽 부모가 product 경로를
+건드림), handoff는 존재하지 않던 커밋을 이름 붙일 수 없다. 이전 수정 전에는 부모 수 fallback이
+면제했는데(advisory), 수정 후에는 **충족 불가능한 hard failure**가 된다.
+
+**메인이 end-to-end로 재현했다.** 양쪽 부모가 product 파일을 건드리는 merge를 만들어
+`GITHUB_REF=refs/heads/main`으로 검사 → freshness 실패 확인. dependabot merge가 main에
+들어오는 실제 경로다.
+
+**진짜 참 조건은 "non-pull ref"가 아니라 "HEAD가 이름 붙일 수 없는 merge"다.** 술어를
+`isUnnameableHead`로 교체: `refs/pull/`이거나, HEAD가 merge이고 `productHead === gitHead`일 때
+면제. TREESAME한 merge는 `productHead`가 부모로 해소되어 **이름 붙일 수 있으므로 계속 검사**한다.
+
+양방향 검증:
+- 이전 over-fix로 되돌리면 → "unnameable merge 면제" 테스트 RED
+- 원래 버그로 되돌리면 → "nameable merge 검사" 테스트 RED
+
+**교훈: 면제 조건을 세울 때 "그 조건이 참인 다른 경우"를 먼저 열거한다.** 3차 리뷰의 실수는
+`refs/heads`를 "이름 붙일 수 있음"과 동일시한 것이었다. main merge가 반례다.
+
+### [minor] merge queue ref — **새 술어가 포섭**
+
+`refs/heads/gh-readonly-queue/...`도 synthetic merge를 가진다. 새 술어는 ref가 아니라
+"merge + productHead===HEAD"로 판정하므로 이 경우도 면제된다. 이 리포는 `merge_group` 트리거가
+없어 현재는 잠복이었지만, 술어 교체로 함께 해결됐다.
+
+### [nit] fixture의 env/branch 불일치 — **수정**
+
+테스트 헬퍼가 env에 `refs/heads/main`을 선언하면서 fixture 브랜치는 `git init` 기본값이었다.
+그리고 merge fixture가 중복이었다. 다시 쓰면서 `base`를 실제로 읽도록 했고, 양쪽 부모가
+product를 건드리는 fixture(`unnameableMergeRepo`)와 TREESAME fixture(`mergeCommitRepo`)를
+의도적으로 분리했다.
+
+### 검증
+
+4모드 **398 tests / 398 pass / 0 fail**, tsc exit 0, build exit 0, session:close OK.
+뮤턴 A/B 양방향 RED 확인.
