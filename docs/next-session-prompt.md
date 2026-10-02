@@ -50,7 +50,7 @@ TOOL_LABEL: opencode (space-bunny-free) · 회귀 리뷰는 opencode-go/deepseek
 - passed: 398 / failed: 0 / suites: 35 / test files discovered: 15
 - build exit 0, tsc exit 0, validate-context OK
 - baseline 실행 시각: 2026-10-01T10:40 (node v24.19.0, ABI 137)
-- 제품 커밋: f3f42e0 (세션 종료 리뷰 major 수정 — main merge push의 freshness)
+- 제품 커밋: 3d93241 (4차 리뷰 major 수정 — unnameable merge만 면제)
 - 직전 제품 커밋: baab3d2 (CI freshness 면제 + #035 종료)
 - 다음 세션 시작 시 `npm run verify` 재실행 필요. 다르면 baseline이 드리프트한 것이다
 
